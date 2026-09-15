@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consequence — Polymarket resolution, executed by KeeperHub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #07090d;
+    --panel: rgba(255,255,255,0.035);
+    --panel-border: rgba(255,255,255,0.09);
+    --text: #e8ecf3;
+    --muted: #8b93a5;
+    --accent: #6366f1;
+    --accent2: #22d3ee;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 500px at 70% -10%, rgba(99,102,241,0.14), transparent 60%),
+      radial-gradient(900px 500px at 10% 0%, rgba(34,211,238,0.08), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Inter", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 28px 80px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+  .brand { display: flex; flex-direction: column; gap: 6px; }
+  .logo { display: flex; align-items: baseline; gap: 12px; }
+  .logo .name { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+  .logo .mono { font-family: var(--mono); color: var(--accent2); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .tagline { color: var(--muted); font-size: 15px; max-width: 640px; }
+  .tagline b { color: var(--text); }
+  .status-pill { display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--muted); flex-wrap: wrap; justify-content: flex-end; }
+  .pill { border: 1px solid var(--panel-border); background: var(--panel); padding: 6px 10px; border-radius: 999px; display: inline-flex; gap: 7px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .dot.err { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+
+  .pipeline { margin-top: 34px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .stage { flex: 1; min-width: 130px; border: 1px solid var(--panel-border); background: var(--panel); border-radius: 12px; padding: 12px 14px; position: relative; }
+  .stage .idx { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .stage .nm { font-size: 13px; font-weight: 600; margin-top: 3px; }
+  .stage .desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .stage.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px rgba(99,102,241,0.25); }
+  .stage.done { border-color: rgba(52,211,153,0.5); }
+  .arrow { color: var(--muted); font-family: var(--mono); }
+
+  .card { margin-top: 26px; border: 1px solid var(--panel-border); background: var(--panel); border-radius: 14px; overflow: hidden; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
+  .card-head .q { font-size: 15px; font-weight: 600; line-height: 1.35; }
+  .card-head .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .badge { font-family: var(--mono); font-size: 11px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--panel-border); text-transform: uppercase; letter-spacing: 0.06em; }
+  .badge.ARMED { color: var(--warn); border-color: rgba(251,191,36,0.4); }
+  .badge.LOCKED { color: var(--accent2); border-color: rgba(34,211,238,0.4); }
+  .badge.RESOLVED { color: var(--accent); border-color: rgba(99,102,241,0.5); }
+  .badge.EXECUTING { color: var(--warn); border-color: rgba(251,191,36,0.5); }
+  .badge.SETTLED { color: var(--good); border-color: rgba(52,211,153,0.5); }
+  .badge.FAILED, .badge.EXPIRED { color: var(--bad); border-color: rgba(248,113,113,0.5); }
+
+  .card-body { padding: 18px 20px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 22px; }
+  @media (max-width: 760px) { .card-body { grid-template-columns: 1fr; } }
+  .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 1px; }
+  .kv .v { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .kv .v.good { color: var(--good); }
+  .log { font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow: auto; }
+  .log .row { display: flex; gap: 10px; align-items: baseline; }
+  .log .t { color: var(--muted); white-space: nowrap; }
+  .log .ty { color: var(--accent2); white-space: nowrap; width: 84px; flex: none; }
+  .log .msg { color: var(--text); }
+  .log a { color: var(--accent2); text-decoration: none; }
+  .log a:hover { text-decoration: underline; }
+  a { color: inherit; }
+  .empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 14px; }
+  .foot { margin-top: 40px; color: var(--muted); font-size: 12px; font-family: var(--mono); line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">
+        <span class="name">Consequence</span>
+        <span class="mono">KeeperHub &times; Polymarket</span>
+      </div>
+      <div class="tagline">
+        Your prediction can be <b>uncertain</b>. Your financial response cannot.<br>
+        A precommitted execution layer: when a Polymarket market resolves, the outcome is redeemed on-chain and the payout is routed to a destination you locked in advance — executed deterministically by KeeperHub.
+      </div>
+    </div>
+    <div class="status-pill">
+      <span class="pill"><span id="s-poly" class="dot"></span>Polygon</span>
+      <span class="pill"><span id="s-gamma" class="dot"></span>Gamma</span>
+      <span class="pill"><span id="s-kh" class="dot"></span>KeeperHub</span>
+      <span class="pill"><span id="clock" class="mono">--</span></span>
+    </div>
+  </header>
+
+  <div class="pipeline">
+    <div class="stage" id="st-1"><div class="idx">01</div><div class="nm">ARMED</div><div class="desc">policy declared</div></div>
+    <span class="arrow">&#8594;</span>
+    <div class="stage" id="st-2"><div class="idx">02</div><div class="nm">LOCKED</div><div class="desc">positions held</div></div>
+    <span class="arrow">&#8594;</span>
+    <div class="stage" id="st-3"><div class="idx">03</div><div class="nm">RESOLVED</div><div class="desc">market settled</div></div>
+    <span class="arrow">&#8594;</span>
+    <div class="stage" id="st-4"><div class="idx">04</div><div class="nm">EXECUTING</div><div class="desc">keeper runs</div></div>
+    <span class="arrow">&#8594;</span>
+    <div class="stage" id="st-5"><div class="idx">05</div><div class="nm">SETTLED</div><div class="desc">payout routed</div></div>
+  </div>
+
+  <section id="cards"></section>
+
+  <div class="foot">
+    CONSEQUENCE v0.1 — mainnet demo build<br>
+    Redemption: Polymarket Conditional Tokens (CTF) on Polygon mainnet (chain 137) &middot; Execution: KeeperHub web3 + transfer-token &middot; Ledger: append-only, replayable
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fmt = (h) => h ? h.slice(0, 10) + " " + h.slice(11, 19) : "";
+  const STAGES = ["ARMED", "LOCKED", "RESOLVED", "EXECUTING", "SETTLED"];
+
+  function linkify(msg) {
+    return msg.replace(/(0x[a-fA-F0-9]{64})/g, '<a href="https://polygonscan.com/tx/$1" target="_blank" rel="noreferrer">$1</a>');
+  }
+
+  function frames() {
+    const grid = $("cards");
+    grid.innerHTML = "";
+    if (!data.policies?.length) {
+      grid.innerHTML = '<div class="empty">No policies armed. Run <span class="mono">pnpm arm --market=&lt;id&gt; --treasury=&lt;addr&gt;</span></div>';
+      return;
+    }
+    for (const p of data.policies) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="card-head">
+          <div>
+            <div class="q">${escapeHtml(p.question || p.policyId)}</div>
+            <div class="meta">${p.policyId} &middot; market #${p.marketId} &middot; negRisk: ${p.negRisk} &middot; condition ${slot(p.conditionId)}</div>
+          </div>
+          <span class="badge ${p.state}">${p.state}</span>
+        </div>
+        <div class="card-body">
+          <div class="kv">
+            <span class="k">Resolution</span><span class="v ${p.resolution.resolved ? "good" : ""}">${p.resolution.text}${p.resolution.denominator !== "?" ? " (denom " + p.resolution.denominator + ")" : ""}</span>
+            <span class="k">Position value</span><span class="v">${p.positionValueUsdc || "—"} USDC</span>
+            <span class="k">Treasury</span><span class="v">${slot(p.treasury)}${p.treasuryLabel ? " " + escapeHtml(p.treasuryLabel) : ""}</span>
+            <span class="k">KeeperWorkflow</span><span class="v">composed · staged</span>
+          </div>
+          <div class="log">${p.events.map((e) => `
+            <div class="row">
+              <span class="t">${fmt(e.at)}</span>
+              <span class="ty">${e.type}</span>
+              <span class="msg">${linkify(escapeHtml(e.message || ""))}${(e.txHashes || []).map((th) => ` <a href="https://polygonscan.com/tx/${th}" target="_blank" rel="noreferrer">tx ${slot(th)}</a>`).join("")}</span>
+            </div>`).join("")}</div>
+        </div>`;
+      grid.appendChild(card);
+    }
+  }
+
+  function renderPipeline() {
+    let which = -1;
+    for (let i = 0; i < STAGES.length; i++) {
+      if (heroState === STAGES[i]) which = i;
+    }
+    for (let i = 1; i <= 5; i++) {
+      const st = $("st-" + i);
+      st.classList.remove("active", "done");
+      if (i <= which) st.classList.add("done");
+      if (i === which) st.classList.add("active");
+    }
+  }
+
+  function slot(h) { return h ? h.slice(0, 6) + "…" + h.slice(-4) : "—"; }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  let data = { policies: [] };
+  let heroState = "ARMED";
+
+  async function refresh() {
+    try {
+      const r = await fetch("/policies");
+      data = await r.json();
+      $("s-poly").className = "dot ok";
+      $("s-gamma").className = "dot ok";
+      heroState = data.policies[0]?.state ?? "ARMED";
+      renderPipeline();
+      frames();
+    } catch {
+      $("s-poly").className = "dot err";
+      $("s-gamma").className = "dot err";
+    }
+    $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ");
+  }
+  refresh();
+  setInterval(refresh, 15000);
+</script>
+</body>
+</html>

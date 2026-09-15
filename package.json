@@ -1,0 +1,28 @@
+{
+  "name": "consequence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Consequence: a self-executing bridge between Polymarket resolution and KeeperHub execution. Your prediction can be uncertain. Your financial response cannot.",
+  "type": "module",
+  "scripts": {
+    "market:find": "tsx src/index.ts market-find",
+    "arm": "tsx src/index.ts arm",
+    "status": "tsx src/index.ts status",
+    "demo:bootstrap": "tsx src/index.ts demo-bootstrap",
+    "demo:resolve": "tsx src/index.ts demo-resolve",
+    "demo:distribute": "tsx src/index.ts demo-distribute",
+    "watch": "tsx src/index.ts watch",
+    "dashboard": "tsx scripts/serve-dashboard.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4.23.13",
+    "typescript": "^5"
+  }
+}
