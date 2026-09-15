@@ -6,9 +6,8 @@ import { config } from "dotenv";
 config();
 
 import {
+  EOA_ADDRESS,
   EOA_PRIVATE_KEY,
-  KEEPERHUB_API_BASE,
-  KEEPERHUB_API_KEY,
   USDC,
   USDC_E,
   requireEnv,
@@ -22,7 +21,7 @@ import {
 import {
   classicRedeem,
 } from "./polymarket/redemption.js";
-import { buildRedemptionWorkflow } from "./keeperhub/workflow.js";
+import { buildRedemptionWorkflow, type WorkflowEnvelope } from "./keeperhub/workflow.js";
 import {
   arm as armPolicy,
   getPolicy,
@@ -31,6 +30,12 @@ import {
   transition,
 } from "./policy/ledger.js";
 import type { Policy, RedemptionKind } from "./policy/types.js";
+import {
+  discoverWallet,
+  hasKeeperHubKey,
+  runContractCall,
+} from "./keeperhub/client.js";
+import { preflight, renderPreflight, zeroValueApproveStep } from "./gas/preflight.js";
 
 const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const GAMMA_MARKET_PARAMS = {
@@ -208,7 +213,7 @@ async function demoBootstrap(): Promise<void> {
   const engine = new DemoEngine(wallet);
 
   const collateral = process.env.DEMO_COLLATERAL ?? USDC;
-  const amountUsdc = process.env.DEMO_AMOUNT_USDC ?? "25";
+  const amountUsdc = process.env.DEMO_AMOUNT_USDC ?? "1";
 
   // 1. Prepare a CTF condition with this wallet as reporter.
   const { conditionId, txHash } = await engine.prepareCondition({});
@@ -345,34 +350,103 @@ function writeDemoState(state: DemoState): void {
 async function executeWorkflow(policyId: string): Promise<void> {
   const policy = getPolicy(policyId);
   if (!policy) throw new Error(`No policy ${policyId}`);
-  const apiKey = KEEPERHUB_API_KEY ?? requireEnv("KEEPERHUB_API_KEY");
-  const url = `${KEEPERHUB_API_BASE}/workflow/execute`;
+  if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
 
-  transition(policy.policyId, "EXECUTING", "Triggering KeeperHub workflow");
+  transition(policy.policyId, "EXECUTING", "Safe execution: simulate the redemption, then broadcast");
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      workflow: policy.workflow,
-      variables: {
-        conditionId: policy.conditionId,
-        treasury: policy.treasuryAddress,
-        amount: policy.positionValueUsdc,
-      },
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    transition(policy.policyId, "FAILED", `KeeperHub execution failed: HTTP ${res.status} ${body}`);
-    throw new Error(`KeeperHub execute failed: ${res.status} ${body}`);
+  const redeemNode = (policy.workflow as WorkflowEnvelope | undefined)?.nodes.find(
+    (n) => n.id === "redeem"
+  );
+  if (!redeemNode) {
+    throw new Error(`Policy ${policyId} has no redeem node in its staged workflow`);
   }
-  const data = (await res.json()) as { executionId?: string; txHashes?: string[] };
-  console.log(`KeeperHub execution: ${JSON.stringify(data)}`);
-  transition(policy.policyId, "SETTLED", "KeeperHub workflow executed", data);
+  const config = redeemNode.data.config as {
+    network?: string;
+    contractAddress?: string;
+    abi?: string;
+    abiFunction?: string;
+    functionArgs?: unknown[];
+  };
+  const txResult = await runContractCall(
+    {
+      contractAddress: config.contractAddress ?? "",
+      chainId: config.network ?? "137",
+      functionName: config.abiFunction ?? "redeemPositions",
+      functionArgs: config.functionArgs,
+      abi: config.abi,
+    },
+    { label: policy.policyId }
+  );
+
+  if (txResult.status !== "completed") {
+    throw new Error(
+      `KeeperHub execution ${txResult.executionId} ended in ${txResult.status}: ${txResult.error ?? "see KeeperHub"}`,
+    );
+  }
+
+  const hash = txResult.transactionHash ?? "";
+  const link = txResult.transactionLink ?? "";
+  const records = hash ? [hash] : [];
+  const links = link ? [link] : [];
+  recordTransaction(policy.policyId, records, links, "Redeemed winning CTF shares via KeeperHub", {
+    executionId: txResult.executionId,
+    sponsored: txResult.sponsored,
+    result: txResult.result,
+  });
+  transition(policy.policyId, "SETTLED", "KeeperHub redemption + routing executed", {
+    executionId: txResult.executionId,
+    transactionLink: link,
+    sponsored: txResult.sponsored,
+  });
+  console.log(`\nSETTLED. Ledger: pnpm status`);
+}
+
+function requireKeeperHubKeyMessage(): string {
+  return (
+    "KEEPERHUB_API_KEY is not set. Create an organisation API key at " +
+    "https://app.keeperhub.com (avatar -> API Keys -> Organisation tab); keys start with kh_. " +
+    "User keys (wfb_) are for webhook triggers and are not interchangeable."
+  );
+}
+
+async function demoPreflight(): Promise<void> {
+  const amountUsdc = process.env.DEMO_AMOUNT_USDC ?? "1";
+  const report = await preflight({ demoAmountUsdc: amountUsdc, eoa: EOA_ADDRESS ?? null });
+  console.log(renderPreflight(report));
+}
+
+async function sanityZeroValue(): Promise<void> {
+  if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
+  const { walletAddress } = await discoverWallet();
+  console.log(`Organisation Turnkey wallet: ${walletAddress}`);
+
+  // Zero-value write on an empty wallet: approve(spender, 0) on USDC Base.
+  // Sponsored gas covers the fee; no POL required; moves no tokens.
+  const step = zeroValueApproveStep(walletAddress);
+  const status = await runContractCall(
+    {
+      contractAddress: step.contractAddress,
+      chainId: "8453",
+      functionName: step.functionName,
+      functionArgs: step.functionArgs,
+      abi: step.abi,
+    },
+    { label: "sanity approve(0)" }
+  );
+  console.log(
+    `\nSponsored zero-value execution proof:\n` +
+      `  executionId  ${status.executionId}\n` +
+      `  status       ${status.status} (sponsored=${status.sponsored})\n` +
+      `  tx           ${status.transactionLink ?? status.transactionHash}\n` +
+      `\nThis landed on Base mainnet with a 0-native balance wallet. Funding was not needed.`
+  );
+  recordTransaction(
+    "sanity",
+    status.transactionHash ? [status.transactionHash] : [],
+    status.transactionLink ? [status.transactionLink] : [],
+    "Zero-value sponsored execution (approve 0) — empty wallet, sponsored gas",
+    { executionId: status.executionId, sponsored: status.sponsored }
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -423,6 +497,13 @@ async function main(): Promise<void> {
     case "demo-distribute":
       await demoDistribute();
       break;
+    case "demo-preflight":
+      await demoPreflight();
+      break;
+    case "sanity": {
+      await sanityZeroValue();
+      break;
+    }
     case "execute": {
       const policyId = values["policy-id"];
       if (!policyId) throw new Error("Specify --policy-id");
@@ -448,12 +529,15 @@ Commands:
   demo-bootstrap           create a deterministic CTF condition + mint YES shares
   demo-resolve             report the payout (on-chain), transition to RESOLVED
   demo-distribute          redeem + route to treasury, transition to SETTLED
+  demo-preflight           print the exact minimum POL + USDC funding before you send anything
+  sanity                   KeeperHub zero-value sponsored execution test (needs kh_ key)
 
 Env:
   EOA_PRIVATE_KEY          wallet that owns positions (demo + Polygon)
+  EOA_ADDRESS              its address (for preflight balance reads)
   TREASURY_ADDRESS        precommitted payout destination
-  KEEPERHUB_API_KEY        org API key for remote execution
-  KEEPERHUB_API_BASE       default https://mcp.keeperhub.com`);
+  KEEPERHUB_API_KEY        org API key (kh_...) for simulation + sponsored execution
+  KEEPERHUB_API_BASE       default https://app.keeperhub.com`);
 }
 
 main().catch((err) => {

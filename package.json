@@ -11,6 +11,8 @@
     "demo:bootstrap": "tsx src/index.ts demo-bootstrap",
     "demo:resolve": "tsx src/index.ts demo-resolve",
     "demo:distribute": "tsx src/index.ts demo-distribute",
+    "demo:preflight": "tsx src/index.ts demo-preflight",
+    "sanity": "tsx src/index.ts sanity",
     "watch": "tsx src/index.ts watch",
     "dashboard": "tsx scripts/serve-dashboard.ts",
     "typecheck": "tsc --noEmit"

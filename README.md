@@ -86,6 +86,7 @@ The fastest way to see the whole loop is the deterministic demo, which uses the
 *real* Polymarket CTF contract with a condition Consequence itself creates:
 
 ```bash
+pnpm demo:preflight     # exact minimum POL + USDC before you fund anything
 pnpm demo:bootstrap     # prepare a CTF condition, split USDC into YES shares, arm a policy
 pnpm demo:resolve       # report the payout on-chain -> policy moves to RESOLVED
 pnpm demo:distribute    # redeem winning shares + route USDC to the treasury -> SETTLED
@@ -94,7 +95,11 @@ pnpm dashboard          # live console at http://localhost:8787
 ```
 
 Every transaction in the demo is a real Polygon mainnet transaction on the
-contract Polymarket uses. No test doubles, no mocks.
+contract Polymarket uses. No test doubles, no mocks. Designed to be cheap on
+purpose: on a live test the whole five-transaction loop ran inside a budget of
+about 0.06-0.23 POL plus 1 USDC of principal — run `pnpm demo:preflight` and
+it prints your exact, live-fee figure before you move any money. Keep only
+that tiny balance in the demo wallet.
 
 ## Live event mode
 
@@ -102,8 +107,16 @@ contract Polymarket uses. No test doubles, no mocks.
 pnpm market:find                      # list markets resolving in the next 7 days
 pnpm arm --market=<id> --treasury=<addr> [--amount=<usdc>]
 pnpm watch                            # poll on-chain resolution until it fires
-pnpm execute --policy-id=<policy-id>  # hand the staged workflow to KeeperHub
+pnpm execute --policy-id=<policy-id>  # simulate, then hand the write to KeeperHub
+pnpm sanity                           # zero-value sponsored execution proof (empty wallet, real tx)
 ```
+
+`execute` follows the safe loop KeeperHub documents: dry-run the redemption
+against the live chain (`simulate: true`), abort unless the simulation reports
+`success: true` and `wouldRevert: false`, then broadcast under a fresh
+`Idempotency-Key` and poll the execution to a terminal status. `sanity` lands a
+real `approve(spender, 0)` on USDC (Base mainnet) from an organisation wallet
+with a zero native balance — sponsored gas covers the fee and no tokens move.
 
 Featured market: the September 2026 FOMC rate decision (market 2252243,
 "Will the Fed decrease interest rates by 25 bps…", ~$48M volume) — resolves
@@ -114,12 +127,13 @@ September 16, 2026, inside the hackathon window.
 | Variable | Purpose |
 |----------|---------|
 | `EOA_PRIVATE_KEY` | wallet that owns the positions (demo + mainnet loop) |
+| `EOA_ADDRESS` | its address (used by `demo:preflight` balance reads) |
 | `TREASURY_ADDRESS` | the enforced payout destination |
-| `KEEPERHUB_API_KEY` | org API key for remote KeeperHub execution |
-| `KEEPERHUB_API_BASE` | default `https://mcp.keeperhub.com` |
+| `KEEPERHUB_API_KEY` | org API key (`kh_…`) for simulation + sponsored execution |
+| `KEEPERHUB_API_BASE` | default `https://app.keeperhub.com` |
 | `MARKET_ID` | default market for `pnpm arm` |
 | `POSITION_VALUE_USDC` | position size used in staged workflows |
-| `DEMO_AMOUNT_USDC` / `DEMO_WINNER` | deterministic demo parameters |
+| `DEMO_AMOUNT_USDC` / `DEMO_WINNER` | deterministic demo parameters (default 1 USDC) |
 
 ## Security model
 
