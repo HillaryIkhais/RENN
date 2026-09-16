@@ -35,6 +35,10 @@ export function reload(): Policy[] {
         parentCollectionId: "0x0000000000000000000000000000000000000000000000000000000000000000",
         negRisk: false,
         treasuryAddress: "",
+        treasuryLabel: "",
+        faceValueUsdc: "",
+        finality: undefined,
+        obligationHash: "",
         redemptionKind: "classic",
       };
       policies.set(entry.policyId, policy);
@@ -43,6 +47,7 @@ export function reload(): Policy[] {
     const transitions: Record<string, Policy["state"] | undefined> = {
       ARMED: "ARMED",
       LOCKED: "LOCKED",
+      WAITING_FINALITY: "WAITING_FINALITY",
       RESOLVED: "RESOLVED",
       EXECUTING: "EXECUTING",
       SETTLED: "SETTLED",

@@ -30,6 +30,7 @@ import {
   transition,
 } from "./policy/ledger.js";
 import type { Policy, RedemptionKind } from "./policy/types.js";
+import { obligationEnvelope } from "./policy/obligation.js";
 import {
   discoverWallet,
   hasKeeperHubKey,
@@ -80,6 +81,8 @@ interface ArmOpts {
   positionValueUsdc?: string;
   treasuryAddress?: string;
   treasuryLabel?: string;
+  beneficiary?: string;
+  faceValueUsdc?: string;
   notes?: string;
 }
 
@@ -100,9 +103,19 @@ async function arm(opts: ArmOpts): Promise<Policy> {
 
   const positionValueUsdc =
     opts.positionValueUsdc ?? process.env.POSITION_VALUE_USDC ?? "100";
+  const faceValueUsdc = opts.faceValueUsdc ?? positionValueUsdc;
   const conditionId = market.conditionId;
   const parentCollectionId = market.parentCollectionId ?? ZERO32;
   const redemptionKind: RedemptionKind = market.negRisk ? "negRisk" : "classic";
+
+  const obligationHash = obligationEnvelope({
+    conditionId,
+    parentCollectionId,
+    beneficiary: treasuryAddress,
+    faceValueUsdc,
+    finality: "on-chain-ctf",
+    redemptionKind,
+  });
 
   const redemptionStep = classicRedeem({
     collateralToken: USDC,
@@ -132,6 +145,9 @@ async function arm(opts: ArmOpts): Promise<Policy> {
     positionValueUsdc,
     treasuryAddress,
     treasuryLabel: opts.treasuryLabel,
+    faceValueUsdc,
+    finality: "on-chain-ctf",
+    obligationHash,
     redemptionKind,
     workflowName: workflow.name,
     workflow,
@@ -142,7 +158,12 @@ async function arm(opts: ArmOpts): Promise<Policy> {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${policy.policyId}.json`), JSON.stringify(workflow, null, 2));
   console.log(
-    `Armed policy ${policy.policyId} against market ${market.id}.\nWorkflow JSON written to ${dir}/${policy.policyId}.json`
+    `Obligation ${policy.policyId} LOCKED against market ${market.id}.\n` +
+      `  beneficiary   ${treasuryAddress}\n` +
+      `  face value    ${faceValueUsdc} USDC\n` +
+      `  finality      on-chain CTF payout state (provisional outcomes cannot settle)\n` +
+      `  obligation    keccak ${obligationHash.slice(0, 18)}…${obligationHash.slice(-6)}\n` +
+      `Workflow JSON written to ${dir}/${policy.policyId}.json`
   );
   return policy;
 }
@@ -159,9 +180,10 @@ async function status(): Promise<void> {
   for (const p of policies) {
     const res = await getResolution(p.conditionId).catch(() => null);
     const resText = res ? describeResolution(res) : "n/a";
+    const blocked = p.state === "WAITING_FINALITY" ? " (SETTLEMENT BLOCKED)" : "";
     console.log(
-      `${p.policyId.padEnd(14)} ${p.state.padEnd(10)} market=${String(p.marketId).padEnd(8)} ` +
-        `${resText.padEnd(12)} ${(p.question ?? "").slice(0, 52)}`
+      `${p.policyId.padEnd(14)} ${(p.state + blocked).padEnd(26)} market=${String(p.marketId).padEnd(8)} ` +
+        `${resText.padEnd(12)} ${(p.question ?? "").slice(0, 48)}`
     );
   }
   console.log("-".repeat(110));
@@ -169,6 +191,12 @@ async function status(): Promise<void> {
 
   for (const p of policies) {
     console.log(`  [${p.policyId}] ${p.state}`);
+    if (p.obligationHash) {
+      console.log(
+        `    OBLIGATION  ${p.faceValueUsdc ?? "?"} USDC -> ${p.treasuryAddress.slice(0, 10)}…` +
+          ` | finality=${p.finality ?? "on-chain-ctf"} | hash=${p.obligationHash.slice(0, 18)}…`
+      );
+    }
     for (const e of p.events) {
       const tx = e.txHashes?.length ? ` tx=${e.txHashes.join(",")}` : "";
       console.log(`    ${e.at.slice(0, 19)} ${e.type.padEnd(12)} ${e.message ?? ""}${tx}`);
@@ -178,15 +206,32 @@ async function status(): Promise<void> {
 }
 
 async function watch(intervalMs = 60_000): Promise<void> {
-  console.log(`Watching for resolution every ${intervalMs / 1000}s. Ctrl-C to stop.`);
+  console.log(
+    `Watching for finality every ${intervalMs / 1000}s. ` +
+      `A provisional outcome blocks settlement; only on-chain payout state RESOLVES. Ctrl-C to stop.`
+  );
   let last = "";
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const policies = reload();
     for (const p of policies.filter((x) => x.state !== "SETTLED" && x.state !== "FAILED")) {
       const res = await getResolution(p.conditionId);
-      if (res.resolved && (p.state === "ARMED" || p.state === "LOCKED")) {
-        transition(p.policyId, "RESOLVED", `On-chain resolution: ${describeResolution(res)}`);
+      // Provisional vs final: Gamma/UMA may mark the outcome before the CTF
+      // payout state is final. Renn only settles on final on-chain state.
+      const proposed =
+        !res.resolved &&
+        p.marketId > 0 &&
+        (await getMarket(p.marketId).catch(() => null))?.umaResolutionStatus
+          ?.toLowerCase() !== "pending";
+      if (proposed && (p.state === "ARMED" || p.state === "LOCKED")) {
+        transition(
+          p.policyId,
+          "WAITING_FINALITY",
+          "Outcome proposed — settlement BLOCKED until on-chain payout state is final"
+        );
+      }
+      if (res.resolved && (p.state === "ARMED" || p.state === "LOCKED" || p.state === "WAITING_FINALITY")) {
+        transition(p.policyId, "RESOLVED", `Final on-chain resolution: ${describeResolution(res)}`);
       }
       const body = `${p.policyId}:${p.state}:${res.payoutDenominator}`;
       if (body !== last) {
@@ -243,7 +288,7 @@ async function demoBootstrap(): Promise<void> {
   // 5. Arm a policy against this synthetic condition.
   const policy = await armPolicy({
     marketId: 0,
-    question: `DEMO: 25 USDC trust condition (deterministic resolution)`,
+    question: `DEMO: ${amountUsdc} USDC deterministic condition (real CTF)`,
     conditionId,
     parentCollectionId: ZERO32,
     negRisk: false,
@@ -352,6 +397,35 @@ async function executeWorkflow(policyId: string): Promise<void> {
   if (!policy) throw new Error(`No policy ${policyId}`);
   if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
 
+  // Hard gate 1: obligation immutability. Recompute the frozen envelope from
+  // the current policy record; any drift means the intent was edited, and the
+  // commitment is void rather than reinterpreted.
+  if (policy.obligationHash) {
+    const expected = obligationEnvelope({
+      conditionId: policy.conditionId,
+      parentCollectionId: policy.parentCollectionId,
+      beneficiary: policy.treasuryAddress,
+      faceValueUsdc: policy.faceValueUsdc ?? policy.positionValueUsdc ?? "0",
+      finality: "on-chain-ctf",
+      redemptionKind: policy.redemptionKind,
+    });
+    if (expected !== policy.obligationHash) {
+      throw new Error(
+        "LOCKED OBLIGATION MISMATCH: policy fields no longer match the frozen obligation hash. " +
+          "Settlement is void; re-arm the obligation."
+      );
+    }
+  }
+
+  // Hard gate 2: finality. A provisional outcome can never cause an
+  // irreversible settlement.
+  if (policy.state === "WAITING_FINALITY") {
+    throw new Error(
+      "SETTLEMENT BLOCKED: the outcome is provisional (finality window open). " +
+        "No irreversible obligation fires on a preliminary result."
+    );
+  }
+
   transition(policy.policyId, "EXECUTING", "Safe execution: simulate the redemption, then broadcast");
 
   const redeemNode = (policy.workflow as WorkflowEnvelope | undefined)?.nodes.find(
@@ -459,7 +533,10 @@ async function main(): Promise<void> {
     options: {
       market: { type: "string" },
       treasury: { type: "string" },
+      beneficiary: { type: "string" },
       amount: { type: "string" },
+      face: { type: "string" },
+      winner: { type: "string" },
       "policy-id": { type: "string" },
       "interval-ms": { type: "string" },
       notes: { type: "string" },
@@ -477,6 +554,7 @@ async function main(): Promise<void> {
       await arm({
         marketId,
         positionValueUsdc: values.amount ?? process.env.POSITION_VALUE_USDC,
+        faceValueUsdc: values.face ?? values.amount ?? process.env.POSITION_VALUE_USDC,
         treasuryAddress: values.treasury ?? process.env.TREASURY_ADDRESS,
         notes: values.notes,
       });
@@ -502,6 +580,19 @@ async function main(): Promise<void> {
       break;
     case "sanity": {
       await sanityZeroValue();
+      break;
+    }
+    case "prototype": {
+      if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
+      const { runPrototype } = await import("./keeperhub/prototype.js");
+      const beneficiary =
+        values.beneficiary ?? values.treasury ?? process.env.TREASURY_ADDRESS;
+      if (!beneficiary) {
+        throw new Error("Specify --beneficiary=<addr> (or TREASURY_ADDRESS) so the obligation has a recipient.");
+      }
+      const face = values.face ?? values.amount ?? process.env.DEMO_AMOUNT_USDC ?? "1";
+      const winner = (values.winner ?? "YES") as "YES" | "NO";
+      await runPrototype({ faceValueUsdc: face, beneficiary, winner });
       break;
     }
     case "execute": {
@@ -531,11 +622,16 @@ Commands:
   demo-distribute          redeem + route to treasury, transition to SETTLED
   demo-preflight           print the exact minimum POL + USDC funding before you send anything
   sanity                   KeeperHub zero-value sponsored execution test (needs kh_ key)
+  prototype --beneficiary=<addr> [--face=<usdc>] [--winner=YES|NO]
+                           full lifecycle executed by KeeperHub: approve -> create condition ->
+                           split -> WAITING FINALITY (blocked) -> resolve -> verify final ->
+                           redeem -> route. Needs ~face USDC (6dp) in the org wallet; gas is sponsored.
+                           Receipts: .data/prototype.jsonl
 
 Env:
   EOA_PRIVATE_KEY          wallet that owns positions (demo + Polygon)
   EOA_ADDRESS              its address (for preflight balance reads)
-  TREASURY_ADDRESS        precommitted payout destination
+  TREASURY_ADDRESS        precommitted payout destination (prototype beneficiary)
   KEEPERHUB_API_KEY        org API key (kh_...) for simulation + sponsored execution
   KEEPERHUB_API_BASE       default https://app.keeperhub.com`);
 }

@@ -61,10 +61,12 @@
   .badge { font-family: var(--mono); font-size: 11px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--panel-border); text-transform: uppercase; letter-spacing: 0.06em; }
   .badge.ARMED { color: var(--warn); border-color: rgba(251,191,36,0.4); }
   .badge.LOCKED { color: var(--accent2); border-color: rgba(34,211,238,0.4); }
+  .badge.WAITING_FINALITY { color: var(--bad); border-color: rgba(248,113,113,0.55); animation: pulse 1.6s infinite; }
   .badge.RESOLVED { color: var(--accent); border-color: rgba(99,102,241,0.5); }
   .badge.EXECUTING { color: var(--warn); border-color: rgba(251,191,36,0.5); }
   .badge.SETTLED { color: var(--good); border-color: rgba(52,211,153,0.5); }
   .badge.FAILED, .badge.EXPIRED { color: var(--bad); border-color: rgba(248,113,113,0.5); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
   .card-body { padding: 18px 20px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 22px; }
   @media (max-width: 760px) { .card-body { grid-template-columns: 1fr; } }
@@ -94,7 +96,10 @@
       </div>
       <div class="tagline">
         Prediction is probabilistic. <b>Settlement isn't.</b><br>
-        A precommitted execution layer: when a Polymarket market resolves, the outcome is redeemed on-chain and the payout is routed to a destination you locked in advance — executed deterministically by KeeperHub.
+        Renn turns a Polymarket position into a <b>finality-gated obligation</b>: the
+        beneficiary, amount and settlement workflow are frozen before the outcome is
+        known; when the on-chain payout state is final, KeeperHub executes exactly that
+        settlement — and nothing else.
       </div>
     </div>
     <div class="status-pill">
@@ -106,29 +111,31 @@
   </header>
 
   <div class="pipeline">
-    <div class="stage" id="st-1"><div class="idx">01</div><div class="nm">ARMED</div><div class="desc">policy declared</div></div>
+    <div class="stage" id="st-1"><div class="idx">01</div><div class="nm">ARMED</div><div class="desc">obligation declared</div></div>
     <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-2"><div class="idx">02</div><div class="nm">LOCKED</div><div class="desc">positions held</div></div>
+    <div class="stage" id="st-2"><div class="idx">02</div><div class="nm">LOCKED</div><div class="desc">envelope frozen</div></div>
     <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-3"><div class="idx">03</div><div class="nm">RESOLVED</div><div class="desc">market settled</div></div>
+    <div class="stage" id="st-3"><div class="idx">03</div><div class="nm">WAITING FINALITY</div><div class="desc">settlement blocked</div></div>
     <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-4"><div class="idx">04</div><div class="nm">EXECUTING</div><div class="desc">keeper runs</div></div>
+    <div class="stage" id="st-4"><div class="idx">04</div><div class="nm">RESOLVED</div><div class="desc">outcome final</div></div>
     <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-5"><div class="idx">05</div><div class="nm">SETTLED</div><div class="desc">payout routed</div></div>
+    <div class="stage" id="st-5"><div class="idx">05</div><div class="nm">EXECUTING</div><div class="desc">keeper settles</div></div>
+    <span class="arrow">&#8594;</span>
+    <div class="stage" id="st-6"><div class="idx">06</div><div class="nm">SETTLED</div><div class="desc">obligation discharged</div></div>
   </div>
 
   <section id="cards"></section>
 
   <div class="foot">
-    RENN v0.1 — mainnet demo build &middot; EVIDENCE PENDING (real transaction hashes appear here as they land)<br>
-    Redemption: Polymarket Conditional Tokens (CTF) on Polygon mainnet (chain 137) &middot; Execution: KeeperHub web3 + transfer-token &middot; Ledger: append-only, replayable
+    RENN v0.1 — mainnet proof build &middot; EVIDENCE PENDING (real KeeperHub execution hashes appear here as they land)<br>
+    Obligation: frozen envelope -> on-chain CTF finality gate -> KeeperHub deterministic execution -> discharge &middot; Safe loop: simulate, one broadcast, poll, verify
   </div>
 </div>
 
 <script>
   const $ = (id) => document.getElementById(id);
   const fmt = (h) => h ? h.slice(0, 10) + " " + h.slice(11, 19) : "";
-  const STAGES = ["ARMED", "LOCKED", "RESOLVED", "EXECUTING", "SETTLED"];
+  const STAGES = ["ARMED", "LOCKED", "WAITING_FINALITY", "RESOLVED", "EXECUTING", "SETTLED"];
 
   function linkify(msg) {
     return msg.replace(/(0x[a-fA-F0-9]{64})/g, '<a href="https://polygonscan.com/tx/$1" target="_blank" rel="noreferrer">$1</a>');
@@ -148,16 +155,18 @@
         <div class="card-head">
           <div>
             <div class="q">${escapeHtml(p.question || p.policyId)}</div>
-            <div class="meta">${p.policyId} &middot; market #${p.marketId} &middot; negRisk: ${p.negRisk} &middot; condition ${slot(p.conditionId)}</div>
+            <div class="meta">${p.policyId} &middot; ${p.faceValueUsdc || p.positionValueUsdc || "—"} USDC obligation &middot; condition ${slot(p.conditionId)}${p.state === "WAITING_FINALITY" ? " &middot; SETTLEMENT BLOCKED" : ""}</div>
           </div>
           <span class="badge ${p.state}">${p.state}</span>
         </div>
         <div class="card-body">
           <div class="kv">
+            <span class="k">Obligation</span><span class="v">${p.faceValueUsdc || p.positionValueUsdc || "—"} USDC</span>
+            <span class="k">Beneficiary</span><span class="v">${slot(p.treasury)}${p.treasuryLabel ? " " + escapeHtml(p.treasuryLabel) : ""}</span>
+            <span class="k">Finality</span><span class="v">${p.finality || "on-chain-ctf"}${p.state === "WAITING_FINALITY" ? ' <b style="color:var(--bad)">(BLOCKED)</b>' : ""}</span>
+            <span class="k">Obligation hash</span><span class="v">${p.obligationHash ? slot(p.obligationHash) : "—"}</span>
             <span class="k">Resolution</span><span class="v ${p.resolution.resolved ? "good" : ""}">${p.resolution.text}${p.resolution.denominator !== "?" ? " (denom " + p.resolution.denominator + ")" : ""}</span>
-            <span class="k">Position value</span><span class="v">${p.positionValueUsdc || "—"} USDC</span>
-            <span class="k">Treasury</span><span class="v">${slot(p.treasury)}${p.treasuryLabel ? " " + escapeHtml(p.treasuryLabel) : ""}</span>
-            <span class="k">KeeperWorkflow</span><span class="v">composed · staged</span>
+            <span class="k">Execution</span><span class="v">KeeperHub workflow frozen</span>
           </div>
           <div class="log">${p.events.map((e) => `
             <div class="row">
@@ -175,7 +184,7 @@
     for (let i = 0; i < STAGES.length; i++) {
       if (heroState === STAGES[i]) which = i;
     }
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       const st = $("st-" + i);
       st.classList.remove("active", "done");
       if (i <= which) st.classList.add("done");

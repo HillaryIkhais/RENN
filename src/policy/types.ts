@@ -1,6 +1,7 @@
 export type PolicyState =
   | "ARMED"
   | "LOCKED"
+  | "WAITING_FINALITY"
   | "RESOLVED"
   | "EXECUTING"
   | "SETTLED"
@@ -9,6 +10,10 @@ export type PolicyState =
 
 export type RedemptionKind = "classic" | "negRisk";
 
+/**
+ * Renn models an obligation, not a payout: WHO gets HOW MUCH, under WHICH
+ * final on-chain condition, via WHICH immutable execution envelope.
+ */
 export interface PolicyInput {
   marketId: number;
   question: string;
@@ -19,9 +24,15 @@ export interface PolicyInput {
   payoutNumerators?: [number, number];
   /** USDC already held by the executing wallet for this policy (UI units) */
   positionValueUsdc?: string;
-  /** precommitted destination */
+  /** precommitted destination (beneficiary in obligation terms) */
   treasuryAddress: string;
   treasuryLabel?: string;
+  /** obligation face value in USDC, frozen at arm time */
+  faceValueUsdc?: string;
+  /** finality requirement: only execute once on-chain payout state is final */
+  finality?: "on-chain-ctf";
+  /** keccak(utf8(JSON of the frozen obligation envelope)): immutability proof */
+  obligationHash?: string;
   redemptionKind: RedemptionKind;
   /** KeeperHub workflow id once composed/created */
   workflowName?: string;
@@ -40,6 +51,7 @@ export interface Policy extends PolicyInput {
 export type PolicyEventType =
   | "ARMED"
   | "LOCKED"
+  | "WAITING_FINALITY"
   | "RESOLVED"
   | "EXECUTING"
   | "SETTLED"
