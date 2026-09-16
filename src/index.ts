@@ -540,6 +540,9 @@ async function main(): Promise<void> {
       "policy-id": { type: "string" },
       "interval-ms": { type: "string" },
       notes: { type: "string" },
+      condition: { type: "string" },
+      resolved: { type: "string" },
+      parent: { type: "string" },
     },
   });
   const cmd = positionals[0] ?? "status";
@@ -595,6 +598,24 @@ async function main(): Promise<void> {
       await runPrototype({ faceValueUsdc: face, beneficiary, winner });
       break;
     }
+    case "zero-value": {
+      if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
+      const { runZeroValueProof } = await import("./keeperhub/prototype.js");
+      const beneficiary =
+        values.beneficiary ?? values.treasury ?? process.env.TREASURY_ADDRESS;
+      if (!beneficiary) {
+        throw new Error("Specify --beneficiary=<addr> (or TREASURY_ADDRESS) so the obligation has a recipient.");
+      }
+      const winner = (values.winner ?? "YES") as "YES" | "NO";
+      await runZeroValueProof({
+        faceValueUsdc: values.face ?? values.amount ?? "0",
+        beneficiary,
+        winner,
+        resolvedConditionId: values.resolved ?? values.condition,
+        resolvedParentCollectionId: values.parent,
+      });
+      break;
+    }
     case "execute": {
       const policyId = values["policy-id"];
       if (!policyId) throw new Error("Specify --policy-id");
@@ -627,6 +648,15 @@ Commands:
                            split -> WAITING FINALITY (blocked) -> resolve -> verify final ->
                            redeem -> route. Needs ~face USDC (6dp) in the org wallet; gas is sponsored.
                            Receipts: .data/prototype.jsonl
+  zero-value --beneficiary=<addr> [--winner=YES|NO]
+                           [--resolved=<resolvedConditionId>]
+                           [--parent=<resolvedParentCollectionId>]
+                           same lifecycle with every amount 0: locked obligation -> finality gate ->
+                           KeeperHub redemption, proven by real Polygon executions with an EMPTY
+                           org wallet (sponsored, no collateral needed). Receipts: .data/zero-value.jsonl
+                           Point --resolved at a real, already-finally-resolved Polymarket condition
+                           to run the redemption + routing hops through a gate that is OPEN on-chain
+                           (no self-created condition, no reporter whitelist dependency).
 
 Env:
   EOA_PRIVATE_KEY          wallet that owns positions (demo + Polygon)

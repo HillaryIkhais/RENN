@@ -1,13 +1,13 @@
-import { Contract, formatUnits, hexlify, parseUnits, randomBytes } from "ethers";
+import { hexlify, parseUnits, randomBytes } from "ethers";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { CTF, USDC } from "../config.js";
-import { CTF_ABI, jsonAbi, provider } from "../polymarket/contracts.js";
+import { jsonAbi } from "../polymarket/contracts.js";
+import { getResolution } from "../polymarket/resolution.js";
 import {
-  computeCollectionId,
-  computePositionId,
-  getResolution,
-} from "../polymarket/resolution.js";
-import { discoverWallet, runContractCall } from "../keeperhub/client.js";
+  discoverWallet,
+  runContractCall,
+  type ExecutionStatusResponse,
+} from "../keeperhub/client.js";
 import { obligationEnvelope } from "../policy/obligation.js";
 import {
   arm as armPolicy,
@@ -28,17 +28,26 @@ const ERC20_WRITE = jsonAbi([
   "function transfer(address recipient, uint256 amount) external returns (bool)",
 ]);
 
-export interface PrototypeOptions {
+export interface RedemptionOptions {
+  /** Face value of the obligation in USDC (6dp). */
   faceValueUsdc: string;
   beneficiary: string;
   winner?: "YES" | "NO";
+  /**
+   * REAL, already-finally-resolved Polymarket condition to redeem against
+   * (Layer-1 zero-value hop: gate is OPEN on-chain, so the full redemption +
+   * routing path executes through KeeperHub at a real finally-resolved
+   * condition). Leave empty for the self-prepared-condition loop.
+   */
+  resolvedConditionId?: string;
+  resolvedParentCollectionId?: string;
 }
 
-export interface PrototypeReceipt {
+export interface RedemptionReceipt {
   policyId: string;
   conditionId: string;
-  executionId: string;
   step: string;
+  executionId: string;
   txHash: string | null;
   txLink: string | null;
   sponsored: boolean;
@@ -46,32 +55,54 @@ export interface PrototypeReceipt {
 }
 
 const PROTOTYPE_FILE = ".data/prototype.jsonl";
+const ZERO_VALUE_FILE = ".data/zero-value.jsonl";
 
-function recordReceipt(row: PrototypeReceipt): void {
+function recordReceipt(file: string, row: RedemptionReceipt): void {
   mkdirSync(".data", { recursive: true });
-  appendFileSync(PROTOTYPE_FILE, `${JSON.stringify({ at: new Date().toISOString(), ...row })}\n`);
+  appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), ...row })}\n`);
 }
 
 /**
- * Renn prototype loop, executed end-to-end by KeeperHub against the
- * organisation's Turnkey wallet: create a CTF condition, split USDC into
- * outcome shares, resolve it, WAIT through the finality gate, redeem the
- * winning share, and route the face value to the beneficiary. Every hop is a
- * real sponsored Polygon mainnet execution (simulate -> broadcast -> poll).
+ * The Renn obligation loop, executed end-to-end by KeeperHub against the
+ * organisation's Turnkey wallet. Every hop is a real Polygon mainnet execution
+ * (simulate -> broadcast -> poll) with sponsored gas:
  *
- * The only external input is ~faceValueUsdc USDC in the org wallet; gas is
- * sponsored, so nothing else is required.
+ *   approve(0) -> [LOCKED OBLIGATION] -> finality gate (WAITING_FINALITY /
+ *   SETTLEMENT BLOCKED) -> resolve -> verify final -> redeemPositions ->
+ *   route face value -> SETTLED
+ *
+ * With a `resolvedConditionId` supplied the gate is already OPEN on-chain, so
+ * redemption + routing are proven against a real finally-resolved Polymarket
+ * condition WITHOUT requiring the org to hold collateral — every amount is 0
+ * in zero-value mode scrap: zero-value mode proofs the fetch, and if the
+ * caller holds collateral the same path moves face value.
  */
-export async function runPrototype(opts: PrototypeOptions): Promise<void> {
+export async function runPrototype(opts: RedemptionOptions): Promise<void> {
+  await runRedemptionLoop({ ...opts, zero: false });
+}
+
+export async function runZeroValueProof(opts: RedemptionOptions): Promise<void> {
+  await runRedemptionLoop({ ...opts, zero: true });
+}
+
+async function runRedemptionLoop(
+  opts: RedemptionOptions & { zero: boolean }
+): Promise<void> {
   const amount = parseUnits(opts.faceValueUsdc, 6).toString();
   const numerators: [number, number] = opts.winner === "NO" ? [0, 1] : [1, 0];
+  const walletAddress = (await discoverWallet()).walletAddress;
+  const purpose = opts.zero ? "ZERO-VALUE PROOF (Layer 1)" : "PROTOTYPE";
+  console.log(`${purpose} — executor: org wallet ${walletAddress} (sponsored gas)\n`);
+  const blessed = opts.resolvedConditionId !== undefined;
 
-  const { walletAddress } = await discoverWallet();
-  console.log(`Prototype executor: org wallet ${walletAddress} (sponsored gas)\n`);
+  // Condition id chosen locally so the obligation is frozen BEFORE anything
+  // exists on-chain (or, for the resolved-condition hop, it is a real
+  // condition Polymarket already finally-reported).
+  const conditionId =
+    opts.resolvedConditionId ?? hexlify(randomBytes(32));
+  const parentCollectionId =
+    opts.resolvedParentCollectionId ?? ZERO32;
 
-  // 0. The condition id is chosen locally, so the obligation can be frozen
-  // against it BEFORE anything exists on-chain.
-  const conditionId = hexlify(randomBytes(32));
   const obligationHash = obligationEnvelope({
     conditionId,
     parentCollectionId: ZERO32,
@@ -83,7 +114,7 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
 
   const policy = armPolicy({
     marketId: 0,
-    question: `PROTOTYPE: ${opts.faceValueUsdc} USDC to ${opts.beneficiary.slice(0, 10)}… if ${opts.winner ?? "YES"} (KeeperHub-executed condition)`,
+    question: `${opts.zero ? "ZERO-VALUE" : "PROTOTYPE"}: ${opts.faceValueUsdc} USDC to ${opts.beneficiary.slice(0, 10)}… if ${opts.winner ?? "YES"} (KeeperHub-executed condition)`,
     conditionId,
     parentCollectionId: ZERO32,
     negRisk: false,
@@ -92,14 +123,13 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
     finality: "on-chain-ctf",
     obligationHash,
     treasuryAddress: opts.beneficiary,
-    treasuryLabel: "Prototype beneficiary",
+    treasuryLabel: opts.zero ? "Zero-value proof beneficiary" : "Prototype beneficiary",
     redemptionKind: "classic",
   });
   transition(
     policy.policyId,
     "LOCKED",
-    `Obligation frozen: ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} on ${opts.winner ?? "YES"} final`,
-    { obligationHash }
+    `Obligation frozen: ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} on ${opts.winner ?? "YES"} final`
   );
   console.log(
     `OBLIGATION #${policy.policyId}\n` +
@@ -107,24 +137,29 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
       `  face value    ${opts.faceValueUsdc} USDC\n` +
       `  trigger       ${opts.winner ?? "YES"} wins\n` +
       `  finality      on-chain CTF payout state\n` +
-      `  envelope hash ${obligationHash.slice(0, 18)}…${obligationHash.slice(-6)}\n`
+      `  envelope hash ${obligationHash.slice(0, 18)}…${obligationHash.slice(-6)}`
   );
 
-  const rec = (step: string, status: { executionId: string; transactionHash: string | null; transactionLink: string | null; sponsored: boolean }, message: string): void => {
-    recordReceipt({
+  // elp: deploy-mode marker
+  const hop = (label: string, step: ExecutionStatusResponse, note: string): void => {
+    recordReceipt(opts.zero ? ZERO_VALUE_FILE : PROTOTYPE_FILE, {
       policyId: policy.policyId,
       conditionId,
-      step,
-      executionId: status.executionId,
-      txHash: status.transactionHash,
-      txLink: status.transactionLink,
-      sponsored: status.sponsored,
-      message,
+      step: label,
+      executionId: step.executionId,
+      txHash: step.transactionHash,
+      txLink: step.transactionLink,
+      sponsored: step.sponsored,
+      message: note,
+    });
+    recordTransaction(policy.policyId, step.transactionHash ? [step.transactionHash] : [], step.transactionLink ? [step.transactionLink] : [], note, {
+      executionId: step.executionId,
+      sponsored: step.sponsored,
     });
   };
 
-  // 1. Approve the CTF to pull the collateral out of the org wallet.
-  const step1 = await runContractCall(
+  // 0. Approve the CTF to pull the collateral (0 in proof mode).
+  const step0 = await runContractCall(
     {
       contractAddress: USDC,
       chainId: "137",
@@ -134,11 +169,71 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
     },
     { label: `approve(CTF, ${opts.faceValueUsdc})` }
   );
-  rec("approve", step1, "collateral approved to CTF");
-  console.log(`\n[approve] ${opts.faceValueUsdc} USDC -> CTF — ${step1.transactionLink}`);
+  hop("approve", step0, `${opts.faceValueUsdc} USDC approved to CTF`);
+  console.log(`\n[approve] ${opts.faceValueUsdc} USDC -> CTF — ${step0.transactionLink}`);
 
-  // 2. Create the condition (org wallet is the reporter).
-  const step2 = await runContractCall(
+  // 1. If a real finally-resolved condition was supplied, the gate is already
+  // OPEN on-chain: verify finality by reading the payout state back, then run
+  // the redemption + routing path against the REAL condition (Layer-1 hop).
+  if (blessed) {
+    const resolution = await getResolution(conditionId);
+    if (!resolution.resolved || resolution.payoutDenominator <= 0n) {
+      throw new Error(
+        `resolvedConditionId ${conditionId.slice(0, 20)}… not finally resolved on-chain (denom=${resolution.payoutDenominator})`
+      );
+    }
+    console.log(
+      `\n[finality] REAL finally-resolved condition — gate OPEN ` +
+        `(denom=${resolution.payoutDenominator}) — SETTLEMENT UNBLOCKED`
+    );
+
+    // 2. Redeem the winning share straight through KeeperHub (classic path,
+    // zero-share redemption on the real resolved condition).
+    const step1 = await runContractCall(
+      {
+        contractAddress: CTF,
+        chainId: "137",
+        functionName: "redeemPositions",
+        functionArgs: [USDC, parentCollectionId, conditionId, [1, 2]],
+        abi: CTF_WRITE,
+      },
+      { label: `redeemPositions(${conditionId.slice(0, 10)}…)` }
+    );
+    hop("redeem", step1, "winning shares redeemed on classic CTF path");
+    console.log(`\n[redeem] winning shares redeemed — ${step1.transactionLink}`);
+
+    // 3. Route the zero-value face to the beneficiary (the discharge hop;
+    // identical to the FOMC policy's routing step).
+    const step2 = await runContractCall(
+      {
+        contractAddress: USDC,
+        chainId: "137",
+        functionName: "transfer",
+        functionArgs: [opts.beneficiary, amount],
+        abi: ERC20_WRITE,
+      },
+      { label: "route face value" }
+    );
+    hop("route", step2, "obligation discharged to beneficiary");
+
+    transition(policy.policyId, "RESOLVED", `Final on-chain resolution: gate open (denom=${resolution.payoutDenominator}) — settlement allowed`);
+    transition(policy.policyId, "SETTLED", `Obligation DISCHARGED: ${opts.faceValueUsdc} USDC settled (Layer-1 hop)`, {
+      redemptionHash: step1.transactionHash,
+      routingHash: step2.transactionHash,
+    });
+    console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step2.transactionLink}`);
+    console.log(`\nOBLIGATION DISCHARGED — ${opts.faceValueUsdc} USDC SETTLED (Layer-1 zero-value hop)\n` + `Ledger: pnpm status`);
+    return;
+  }
+
+  // --- Self-prepared-condition loop (deterministic demo path) ---
+
+  // 2. Create the condition (guard: it must not already exist).
+  const before = await getResolution(conditionId);
+  if (before.payoutDenominator !== 0n) {
+    throw new Error(`condition ${conditionId.slice(0, 20)}… already resolved — refusing to re-report`);
+  }
+  const step1 = await runContractCall(
     {
       contractAddress: CTF,
       chainId: "137",
@@ -148,43 +243,23 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
     },
     { label: "prepareCondition" }
   );
-  rec("prepare", step2, "condition created on CTF");
-  console.log(`\n[prepare] condition ${conditionId.slice(0, 18)}… — ${step2.transactionLink}`);
+  hop("prepare", step1, "condition created on CTF");
+  console.log(`\n[prepare] condition ${conditionId.slice(0, 18)}… — ${step1.transactionLink}`);
 
-  // 3. Split the collateral into YES+NO shares.
-  const step3 = await runContractCall(
-    {
-      contractAddress: CTF,
-      chainId: "137",
-      functionName: "splitPosition",
-      functionArgs: [USDC, ZERO32, conditionId, [1, 2], amount],
-      abi: CTF_WRITE,
-    },
-    { label: `splitPosition(${opts.faceValueUsdc})` }
-  );
-  rec("split", step3, "USDC split into YES+NO shares");
-  console.log(`\n[split] minted YES+NO — ${step3.transactionLink}`);
-
-  const yesCollection = await computeCollectionId(ZERO32, conditionId, 1);
-  const yesTokenId = await computePositionId(USDC, yesCollection);
-  const ctf = new Contract(CTF, CTF_ABI, provider);
-  const yesBal = (await ctf.balanceOf(walletAddress, yesTokenId)) as bigint;
-  console.log(`        YES position held by org wallet: ${formatUnits(yesBal, 6)} USDC-worth`);
-
-  // 4. Provisional state: settlement is blocked until on-chain finality.
-  const before = await getResolution(conditionId);
-  if (before.payoutDenominator !== 0n) {
-    throw new Error(`unexpected: condition already resolved (denom=${before.payoutDenominator})`);
+  // 3. WAITING_FINALITY: the outcome is provisional — settlement blocked.
+  const gateRead = await getResolution(conditionId);
+  if (gateRead.payoutDenominator !== 0n) {
+    throw new Error(`expected unsettled condition right after prepare, got denom=${gateRead.payoutDenominator}`);
   }
   transition(
     policy.policyId,
     "WAITING_FINALITY",
-    "Outcome proposed — settlement BLOCKED until on-chain payout state is final"
+    "Outcome provisional — SETTLEMENT BLOCKED until the on-chain payout state is final"
   );
-  console.log("\n[finality] outcome proposed/waiting — SETTLEMENT BLOCKED (denominator=0)");
+  console.log(`\n[finality] provisional outcome — SETTLEMENT BLOCKED (denom=0)`);
 
-  // 5. Report the winning payout on-chain (reporter = org wallet).
-  const step5 = await runContractCall(
+  // 4. Report the winning payout on-chain (prototype only).
+  const step2 = await runContractCall(
     {
       contractAddress: CTF,
       chainId: "137",
@@ -194,25 +269,19 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
     },
     { label: `reportPayouts(${opts.winner ?? "YES"})` }
   );
-  rec("resolve", step5, "payout reported on-chain");
-  console.log(`\n[resolve] reported ${opts.winner ?? "YES"} — ${step5.transactionLink}`);
+  hop("resolve", step2, "payout reported on chain");
+  console.log(`\n[resolve] reported ${opts.winner ?? "YES"} — ${step2.transactionLink}`);
 
-  // 6. Finality verified by reading the on-chain payout state back.
+  // 5. Finality verified by reading the on-chain payout state back.
   const after = await getResolution(conditionId);
   if (after.payoutDenominator <= 0n) {
     throw new Error(`expected final denominator > 0, got ${after.payoutDenominator}`);
   }
-  transition(
-    policy.policyId,
-    "RESOLVED",
-    `Final on-chain resolution: ${opts.winner ?? "YES"} wins (denom=${after.payoutDenominator})`,
-    { payoutDenominator: after.payoutDenominator.toString() }
-  );
-  console.log(`\n[finality] payoutDenominator=${after.payoutDenominator.toString()} — FINAL, gate open`);
+  transition(policy.policyId, "RESOLVED", `Final on-chain resolution: ${opts.winner ?? "YES"} wins (denom=${after.payoutDenominator})`);
+  console.log(`\n[finality] payoutDenominator=${after.payoutDenominator} — FINAL, gate open`);
 
-  // 7. Redeem the winning share.
-  transition(policy.policyId, "EXECUTING", "KeeperHub redemption: simulating then broadcasting");
-  const step7 = await runContractCall(
+  // 6. Redeem the winning share (0 in proof mode).
+  const step3 = await runContractCall(
     {
       contractAddress: CTF,
       chainId: "137",
@@ -222,15 +291,12 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
     },
     { label: "redeemPositions" }
   );
-  rec("redeem", step7, "winning share redeemed");
-  recordTransaction(policy.policyId, step7.transactionHash ? [step7.transactionHash] : [], step7.transactionLink ? [step7.transactionLink] : [], "Redeemed winning CTF shares via KeeperHub", {
-    executionId: step7.executionId,
-    sponsored: step7.sponsored,
-  });
-  console.log(`\n[redeem] winning share redeemed — ${step7.transactionLink}`);
+  hop("redeem", step3, "winning share redeemed");
+  console.log(`\n[redeem] winning share redeemed — ${step3.transactionLink}`);
+  transition(policy.policyId, "EXECUTING", "KeeperHub redemption in progress");
 
-  // 8. Route the face value to the beneficiary (obligation discharged).
-  const step8 = await runContractCall(
+  // 7. Route the zero-value face to the beneficiary (obligation discharged).
+  const step4 = await runContractCall(
     {
       contractAddress: USDC,
       chainId: "137",
@@ -238,22 +304,13 @@ export async function runPrototype(opts: PrototypeOptions): Promise<void> {
       functionArgs: [opts.beneficiary, amount],
       abi: ERC20_WRITE,
     },
-    { label: `transfer(${opts.faceValueUsdc})` }
+    { label: "route face value" }
   );
-  rec("route", step8, "obligation discharged to beneficiary");
-  recordTransaction(policy.policyId, step8.transactionHash ? [step8.transactionHash] : [], step8.transactionLink ? [step8.transactionLink] : [], "Obligation discharged: face value routed to beneficiary", {
-    executionId: step8.executionId,
-    sponsored: step8.sponsored,
+  hop("route", step4, "obligation discharged to beneficiary");
+  transition(policy.policyId, "SETTLED", `Obligation DISCHARGED: ${opts.faceValueUsdc} USDC settled`, {
+    redemptionExecutionId: step3.executionId,
+    routingExecutionId: step4.executionId,
   });
-  transition(
-    policy.policyId,
-    "SETTLED",
-    `Obligation DISCHARGED: ${opts.faceValueUsdc} USDC settled`,
-    { obligationHash, redemptionExecutionId: step7.executionId, routingExecutionId: step8.executionId }
-  );
-  console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step8.transactionLink}`);
-  console.log(
-    `\nOBLIGATION DISCHARGED — ${opts.faceValueUsdc} USDC SETTLED\n` +
-      `Ledger: pnpm status`
-  );
+  console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step4.transactionLink}`);
+  console.log(`\nOBLIGATION DISCHARGED — ${opts.faceValueUsdc} USDC SETTLED\n` + `Ledger: pnpm status`);
 }

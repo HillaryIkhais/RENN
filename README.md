@@ -250,6 +250,22 @@ nothing is faked.
   tx `0xd92588006e3592ad5cffbae53c6478e64f66bf656a024944fd17d836ae511c6d`
   (BaseScan), status `completed (sponsored=true)`, on-chain Approval event
   with value 0. Part of the paper trail.
+- **DONE — Layer-1 zero-value redemption proof (Polygon):** the locked
+  obligation -> finality-gate -> redemption -> routing path executed by
+  KeeperHub against a REAL, already-finally-resolved Polymarket condition
+  (`denom=1`, gate OPEN on-chain), sponsor-gas, EMPTY org wallet. All three
+  hops are real Polygon mainnet transactions:
+  1. `approve(CTF, 0)` — `executionId dblyr1n2ahek4iegwi96b`,
+     tx `0x1579c791f0cecb8fb335702444cc2a117088769873218f6dc35560cd2239264a`
+  2. `redeemPositions` on condition `0x0c481aa6…eae0` (Credible FDV >$100M,
+     finally resolved on-chain) — `executionId a9o7uh3k9mth5mhnmeoay`,
+     tx `0xc7953f3264ec519651cd15ec45beb4ad39375b008d40a1478fb437485388ff77`
+  3. `transfer(0)` to the beneficiary — `executionId y3729jn0stn1xmdmafg6h`,
+     tx `0x2c453a77967e4616395bc75c564a672cbaf873a268c03b3cfa382a5b425f45b1`
+  Receipts: `.data/zero-value.jsonl` (all `sponsored:true`). This proves the
+  finality gate opens only on real on-chain resolution and the redemption path
+  executes through KeeperHub at a real finally-resolved condition — without
+  self-creating a condition or needing collateral.
 - Evidence path to a filled paper trail:
   1. `pnpm prototype --beneficiary=…` — the full six-hop lifecycle
      (approve/create/split/block/resolve/redeem/route) executed by KeeperHub.

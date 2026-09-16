@@ -163,6 +163,24 @@ the redemption through the simulate → broadcast → status-poll loop in
   `0xd92588006e3592ad5cffbae53c6478e64f66bf656a024944fd17d836ae511c6d`
   (BaseScan, `completed`, `sponsored=true`). The sponsored-execution leg of the
   paper trail.
+- **Layer-1 zero-value redemption proof (Polygon):** three real sponsored
+  Polygon mainnet transactions from `pnpm zero-value` against a real,
+  already-finally-resolved Polymarket condition (`denom=1`, gate OPEN on-chain),
+  empty org wallet, zero collateral:
+  1. `approve(CTF, 0)` — `executionId dblyr1n2ahek4iegwi96b`,
+     tx `0x1579c791f0cecb8fb335702444cc2a117088769873218f6dc35560cd2239264a`
+     (sponsored=true)
+  2. `redeemPositions` on condition `0x0c481aa63ec6…eae0` —
+     `executionId a9o7uh3k9mth5mhnmeoay`,
+     tx `0xc7953f3264ec519651cd15ec45beb4ad39375b008d40a1478fb437485388ff77`
+     (sponsored=true)
+  3. `transfer(0)` to beneficiary — `executionId y3729jn0stn1xmdmafg6h`,
+     tx `0x2c453a77967e4616395bc75c564a672cbaf873a268c03b3cfa382a5b425f45b1`
+     (sponsored=true)
+  All three in `.data/zero-value.jsonl`. Proves the finality gate opens only
+  on real on-chain resolution and the redemption path executes through
+  KeeperHub at a real finally-resolved condition — no self-created condition,
+  no collateral needed.
 
 **PENDING — requires ~1 USDC in the org wallet on Polygon (sponsored gas):**
 - `pnpm prototype --beneficiary=…` — the full six-hop KeeperHub-executed
@@ -205,12 +223,10 @@ inserted; no fake receipts, no fake live execution.
 | Evidence | Where it lands | Status |
 |----------|----------------|--------|
 | `sanity` sponsored tx (Base) | `pnpm sanity` | **DONE** — `0xd92588006e…511c6d` (sponsored, approval 0) |
-| Prototype: `approve` (Polygon) | `pnpm prototype` | PENDING (~1 USDC in org wallet) |
-| Prototype: `prepareCondition` | `pnpm prototype` | PENDING |
-| Prototype: `splitPosition` | `pnpm prototype` | PENDING |
-| Prototype: report payout + verify final | `pnpm prototype` | PENDING |
-| Prototype: `redeemPositions` | `pnpm prototype` | PENDING |
-| Prototype: USDC routing to beneficiary | `pnpm prototype` | PENDING |
+| Layer-1: `approve(CTF, 0)` (Polygon) | `pnpm zero-value --resolved=…` | **DONE** — `0x1579c791…264a` (sponsored) |
+| Layer-1: `redeemPositions` (real resolved condition, gate OPEN) | `pnpm zero-value --resolved=…` | **DONE** — `0xc7953f32…ff77` (sponsored) |
+| Layer-1: `transfer(0)` to beneficiary | `pnpm zero-value --resolved=…` | **DONE** — `0x2c453a77…f45b1` (sponsored) |
+| Prototype: full lifecycle (approve/create/split/block/resolve/redeem/route) | `pnpm prototype` | PENDING (~1 USDC in org wallet) |
 | FOMC redemption execution | `pnpm execute --policy-id=policy-2252243` | PENDING (blocked until final) |
 | Local demo loop (5 hashes) | `pnpm demo:*` | PENDING (optional cross-check) |
 | On-chain resolution + ABI + finality-gate verification | README "Evidence status" | DONE |

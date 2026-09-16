@@ -214,7 +214,7 @@ export async function runContractCall(
 
   const { response, data } = await executeContractCall(
     input,
-    `${label}:${randomUUID()}`
+    `${label.replace(/[^\x20-\x7E]/g, "_")}:${randomUUID()}`
   );
   if (!response.ok) {
     throw new Error(`execute ${label} failed (${response.status}): ${JSON.stringify(data)}`);
