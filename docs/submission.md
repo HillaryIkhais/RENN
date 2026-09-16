@@ -112,14 +112,19 @@ status-poll loop in `src/keeperhub/client.ts`.
   `pnpm arm` / `pnpm status`.
 - The dashboard and CLI end-to-end.
 
+**Funded/sponsored evidence already on-chain:**
+- The zero-value sponsored execution proof — `pnpm sanity` landed a real
+  USDC-Base `approve(0)` on Base mainnet from the empty org Turnkey wallet,
+  gas fully sponsored by KeeperHub: `executionId ae9x3lx6lkyyfmw0wkk20`, tx
+  `0xd92588006e3592ad5cffbae53c6478e64f66bf656a024944fd17d836ae511c6d`
+  (BaseScan, `completed`, `sponsored=true`). No funding was needed.
+
 **Requires sub-$1 funding (our funded local proof harness — NOT the product):**
 - The deterministic demo loop's real transaction hashes
   (~0.06-0.23 POL + 1 USDC principal; exact figure from `demo:preflight`).
   These are the self-created-CTF evidence hashes.
 
 **Requires a free KeeperHub organisation key (`kh_…`):**
-- The zero-value sponsored execution proof (`pnpm sanity`: a real mainnet
-  `approve(0)` on Base USDC from an empty org wallet).
 - The KeeperHub-driven redemption run (`pnpm execute`).
 
 The product itself is the KeeperHub execution layer and does not require the
@@ -153,7 +158,7 @@ inserted. No fake receipts, no fake live execution.
 | `reportPayouts` tx | `pnpm demo:resolve` | PENDING |
 | `redeemPositions` tx | `pnpm demo:distribute` | PENDING |
 | USDC routing tx | `pnpm demo:distribute` | PENDING |
-| `sanity` sponsored tx (Base) | `pnpm sanity` | PENDING (kh key) |
+| `sanity` sponsored tx (Base) | `pnpm sanity` | **DONE** — `0xd92588006e…511c6d` (sponsored, approval 0) |
 | KeeperHub redemption execution | `pnpm execute --policy-id=…` | PENDING (kh key) |
 | On-chain resolution + ABI verification | README "Evidence status" | DONE |
 

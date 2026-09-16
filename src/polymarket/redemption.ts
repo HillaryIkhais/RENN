@@ -1,5 +1,5 @@
 import { CTF, NEG_RISK_ADAPTER, USDC } from "../config.js";
-import { CTF_ABI, NEG_RISK_ADAPTER_ABI } from "./contracts.js";
+import { CTF_ABI, NEG_RISK_ADAPTER_ABI, jsonAbi } from "./contracts.js";
 
 /**
  * Calldata builders for Polymarket redemption, used to configure the
@@ -10,7 +10,7 @@ import { CTF_ABI, NEG_RISK_ADAPTER_ABI } from "./contracts.js";
 export function approveNegRiskAdapter(): { to: string; abi: string; functionName: string; args: unknown[] } {
   return {
     to: CTF,
-    abi: JSON.stringify([
+    abi: jsonAbi([
       "function setApprovalForAll(address operator, bool approved) external",
     ]),
     functionName: "setApprovalForAll",
@@ -30,7 +30,7 @@ export function classicRedeem(params: {
 }): { to: string; abi: string; functionName: string; args: unknown[] } {
   return {
     to: CTF,
-    abi: JSON.stringify(CTF_ABI),
+    abi: jsonAbi(CTF_ABI),
     functionName: "redeemPositions",
     args: [
       params.collateralToken ?? USDC,
@@ -52,7 +52,7 @@ export function negRiskRedeem(params: {
 }): { to: string; abi: string; functionName: string; args: unknown[] } {
   return {
     to: NEG_RISK_ADAPTER,
-    abi: JSON.stringify(NEG_RISK_ADAPTER_ABI),
+    abi: jsonAbi(NEG_RISK_ADAPTER_ABI),
     functionName: "redeemPositions",
     args: [params.conditionId, params.amounts.map(String)],
   };
@@ -65,7 +65,7 @@ export function erc20Transfer(params: {
 }): { to: string; abi: string; functionName: string; args: unknown[] } {
   return {
     to: params.token,
-    abi: JSON.stringify([
+    abi: jsonAbi([
       "function transfer(address recipient, uint256 amount) external returns (bool)",
     ]),
     functionName: "transfer",

@@ -1,5 +1,5 @@
 import { formatUnits } from "ethers";
-import { provider } from "../polymarket/contracts.js";
+import { provider, jsonAbi } from "../polymarket/contracts.js";
 import { USDC } from "../config.js";
 
 /**
@@ -167,7 +167,7 @@ export function zeroValueApproveStep(spender: string): {
     contractAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
     functionName: "approve",
     functionArgs: [spender, 0],
-    abi: JSON.stringify([
+    abi: jsonAbi([
       "function approve(address spender, uint256 amount) external returns (bool)",
     ]),
   };

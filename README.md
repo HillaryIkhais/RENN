@@ -136,6 +136,8 @@ against the live chain (`simulate: true`), abort unless the simulation reports
 `Idempotency-Key` and poll the execution to a terminal status. `sanity` lands a
 real `approve(spender, 0)` on USDC (Base mainnet) from an organisation wallet
 with a zero native balance — sponsored gas covers the fee and no tokens move.
+It has already done so: `executionId ae9x3lx6lkyyfmw0wkk20` (see Evidence
+status below).
 
 Featured market: the September 2026 FOMC rate decision (market 2252243,
 "Is the Fed decreasing rates by 25 bps after the September 2026 meeting?",
@@ -180,11 +182,17 @@ unfunded, captured by `pnpm sanity` and `pnpm execute --simulate`.
 - Verified on-chain (no funds needed): Polymarket contract presence, CTF ABI
   and selectors, resolution reads on resolved markets, position ID math,
   workflow envelope composition, ledger state machine.
+- Real sponsored transaction (DONE): `pnpm sanity` landed a zero-value
+  USDC-Base `approve(0)` on Base mainnet from the organization's empty Turnkey
+  wallet, fully gas-sponsored — `executionId ae9x3lx6lkyyfmw0wkk20`, tx
+  `0xd92588006e3592ad5cffbae53c6478e64f66bf656a024944fd17d836ae511c6d`
+  (BaseScan), status `completed (sponsored=true)`, on-chain Approval event
+  with value 0. It is the sponsored-execution leg of the paper trail.
 - Pending real transaction hashes: the deterministic demo loop
-  (split / resolve / redeem / route), the zero-value sponsored `sanity`
-  transaction, and the KeeperHub `execute` redemption run. These are the only
-  placeholders left in the submission packet and in the dashboard; nothing is
-  faked, everything is marked PENDING until it lands.
+  (split / resolve / redeem / route) and the KeeperHub `execute` redemption
+  run. These are the only placeholders left in the submission packet and in
+  the dashboard; nothing is faked, everything is marked PENDING until it
+  lands.
 
 ## Detail docs
 

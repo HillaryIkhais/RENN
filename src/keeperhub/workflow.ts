@@ -1,4 +1,5 @@
 import { USDC } from "../config.js";
+import { jsonAbi } from "../polymarket/contracts.js";
 
 export interface WorkflowNode {
   id: string;
@@ -105,7 +106,7 @@ function readResolution(chainNetwork: string, conditionId: string): WorkflowNode
         actionType: "web3/read-contract",
         network: chainNetwork,
         contractAddress: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-        abi: JSON.stringify([
+        abi: jsonAbi([
           "function payoutDenominator(bytes32 conditionId) external view returns (uint256)",
         ]),
         abiFunction: "payoutDenominator",

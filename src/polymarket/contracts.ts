@@ -1,5 +1,17 @@
-import { JsonRpcProvider, Contract } from "ethers";
+import { Fragment, JsonRpcProvider, Contract } from "ethers";
 import { NEG_RISK_ADAPTER, RPC_URL } from "../config.js";
+
+/**
+ * Expand ethers human-readable function signatures into the canonical JSON
+ * ABI objects KeeperHub's direct-execution routes parse. Those routes
+ * JSON-deserialize the `abi` field and match entries by `type: "function"`;
+ * human-readable fragments are not expanded on that path.
+ */
+export function jsonAbi(fragments: readonly string[]): string {
+  return JSON.stringify(
+    fragments.map((f) => JSON.parse(Fragment.from(f).format("json")))
+  );
+}
 
 export const provider = new JsonRpcProvider(RPC_URL, 137, {
   staticNetwork: true,

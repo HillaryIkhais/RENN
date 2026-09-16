@@ -11,7 +11,7 @@ exists.
 |------|----------|-------|
 | 1 (arm + dashboard) | nothing (already verified live) | reads, states, workflow JSON — all real |
 | 2 (deterministic loop) | ~0.6 POL + 2 USDC in the throwaway EOA | 5 real Polygon hashes |
-| 3 (KeeperHub execution) | free `kh_` org key | 1 sponsored Base hash + simulate log |
+| 3 (KeeperHub execution) | `kh_` org key (present) | 1 sponsored Base hash (recorded: `0xd92588…511c6d`) + `execute` log |
 
 If a take's prerequisite is missing, say so in the video and stop — no
 placeholders dressed as receipts.
@@ -114,6 +114,6 @@ isn't. Repo, docs, and the Arc bounty PR are linked below.]
 1. [ ] `prepareCondition` / `splitPosition` hashes from `demo:bootstrap`
 2. [ ] `reportPayouts` hash from `demo:resolve`
 3. [ ] `redeemPositions` + routing hashes from `demo:distribute`
-4. [ ] `sanity` sponsored Base hash
+4. [x] `sanity` sponsored Base hash — `0xd92588006e3592ad5cffbae53c6478e64f66bf656a024944fd17d836ae511c6d` (approval 0, sponsored)
 5. [ ] KeeperHub `execute` executionId + transaction link
 6. [ ] Dashboard screenshots with EVIDENCE PENDING cleared
