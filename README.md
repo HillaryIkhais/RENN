@@ -1,19 +1,20 @@
-# Consequence
+# Renn
 
-**Polymarket resolution, executed by KeeperHub.**
+**Prediction is probabilistic. Settlement isn't.**
 
-> Your prediction can be uncertain. Your financial response cannot.
+Renn turns resolved Polymarket positions into deterministic financial execution
+through KeeperHub. You precommit, in advance, what the money does when the
+market resolves. The day the world decides, Renn does not consult anyone: it
+verifies the on-chain resolution, redeems the winning shares, and routes the
+payout to the destination you locked in — every step executed by KeeperHub,
+every step recorded in an append-only ledger with verifiable transaction
+receipts.
 
-Consequence is a self-executing bridge between Polymarket's prediction markets
-and KeeperHub's deterministic workflow engine. You precommit, in advance, what
-the money does when the market resolves. The day the world decides, Consequence
-does not consult anyone: it verifies the on-chain resolution, redeems the
-winning shares, and routes the payout to the destination you locked in — every
-step executed by KeeperHub, every step recorded in an append-only ledger with
-verifiable transaction receipts.
+`ARMED → LOCKED → RESOLVED → EXECUTING → SETTLED`
 
-Part of the KeeperHub "Agent Economy" Hackathon (main track) and the Arc
-Testnet chain-registration bounty (issue #2230, merged in the accompanying PR).
+Part of the KeeperHub "Agent Economy" Hackathon (main track, deadline
+September 18 12:00 CEST) and the Arc Testnet chain-registration bounty
+(issue #2230, PR merged alongside).
 
 ## Why this matters
 
@@ -27,9 +28,9 @@ silent capital-loss machine:
 - Refund decisions and treasury rebalancing wait on an individual.
 - "Do the thing on resolution" is precisely what a deterministic keeper should do.
 
-Consequence collapses the after-the-fact half of the trade into a precommitted,
-autonomous pipeline. The value it unlocks is the *guarantee*: a consequence
-pipeline can be audited by the recipient before a single share is bought.
+Renn collapses the after-the-fact half of the trade into a precommitted,
+autonomous pipeline. The value it unlocks is the *guarantee*: a Renn pipeline
+can be audited by the recipient before a single share is bought.
 
 ## The loop
 
@@ -46,11 +47,30 @@ ever driven by on-chain evidence, never by a human "please pay" instruction.
 `payoutDenominator` on the Polymarket Conditional Tokens contract is the only
 thing that moves a policy from RESOLVED to EXECUTING.
 
+## Architecture
+
+```
+                  POLYMARKET                        KEEPERHUB
+  Gamma API ──> conditionId ──> on-chain CTF   ──> workflow (read/gate/redeem/route)
+       │                │                             │            │
+       │                ▼                             ▼            ▼
+   market truth     payoutDenominator > 0    simulate -> broadcast   status poll
+       │                │                    (success && !revert)   (completed)
+       └────────────────┴───────────── RENN policy ledger (append-only JSONL)
+```
+
+- Renn owns the **decision state machine** (armed/locked/resolved/etc.) and
+  the **on-chain truth reads** (resolution, balances, position IDs).
+- KeeperHub owns the **execution**: custody of the wallet, simulation, gas
+  sponsorship, idempotent broadcast, and receipt reconciliation.
+- Renn never signs and never holds keys. The money logic is a normal,
+  inspectable KeeperHub workflow.
+
 ## Why KeeperHub
 
-The execution is KeeperHub's job, not ours. Consequence composes a real
-KeeperHub workflow — with `web3/read-contract`, a gate, `web3/write-contract`
-and `web3/transfer-token` nodes — and hands it to KeeperHub to run:
+The execution is KeeperHub's job, not ours. Renn composes a real KeeperHub
+workflow — with `web3/read-contract`, a gate, `web3/write-contract` and
+`web3/transfer-token` nodes — and hands it to KeeperHub to run:
 
 | KeeperHub step            | Role                                                  |
 |---------------------------|-------------------------------------------------------|
@@ -60,20 +80,19 @@ and `web3/transfer-token` nodes — and hands it to KeeperHub to run:
 | `web3/transfer-token`     | route the winning USDC to the precommitted treasury   |
 
 The workflow is emitted as a plain JSON envelope (`src/keeperhub/workflow.ts`)
-that can be imported into the KeeperHub builder, driven over the MCP/API
-surface, or executed directly. Because KeeperHub executes from the
-organization's wallet with a full audit log (every tx hash, every receipt
-status, every step output), Consequence gets custody-grade execution without
-running money logic natively.
+that can be imported into the KeeperHub builder, driven over the API surface,
+or executed directly. **Settlement is deterministic**: the same workflow that
+reads the resolution is the one that moves the money. There is no step between
+"the market resolved" and "the payout is home" where a human is consulted.
 
 ## Redemption paths
 
 - **Classic CTF redemption** — `redeemPositions(collateral, parent, condition,
   [1, 2])` on the Polymarket Conditional Tokens contract
   (`0x4D97DCd97eC945f40cF65F87097ACe5EA0476045`). No approval required.
-- **NegRisk redemption** — `redeemPositions(conditionId, [yes, no])` on the
+- **NegRisk redemption** — `redeemPositions(conditionId, [1, 2])` on the
   NegRisk adapter (`0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296`), gated by a
-  one-time `setApprovalForAll` step that the workflow includes automatically.
+  one-time `setApprovalForAll` step the workflow can include automatically.
 - **AutoRedeemer / exchange settlement** — for new-generational CLOB markets,
   resolution settlement is observed and the routing step still applies.
 
@@ -83,7 +102,7 @@ uses. USDC collateral: `0x3c499c542cef5e3811e1192ce70d8cc03d5c3359`.
 ## Deterministic demo mode
 
 The fastest way to see the whole loop is the deterministic demo, which uses the
-*real* Polymarket CTF contract with a condition Consequence itself creates:
+*real* Polymarket CTF contract with a condition Renn itself creates:
 
 ```bash
 pnpm demo:preflight     # exact minimum POL + USDC before you fund anything
@@ -96,10 +115,10 @@ pnpm dashboard          # live console at http://localhost:8787
 
 Every transaction in the demo is a real Polygon mainnet transaction on the
 contract Polymarket uses. No test doubles, no mocks. Designed to be cheap on
-purpose: on a live test the whole five-transaction loop ran inside a budget of
-about 0.06-0.23 POL plus 1 USDC of principal — run `pnpm demo:preflight` and
-it prints your exact, live-fee figure before you move any money. Keep only
-that tiny balance in the demo wallet.
+purpose: the whole five-transaction loop runs inside a budget of about
+0.06-0.23 POL plus 1 USDC of principal — `pnpm demo:preflight` prints your
+exact, live-fee figure before you move any money. Keep only that tiny balance
+in the demo wallet; it is a throwaway key.
 
 ## Live event mode
 
@@ -119,14 +138,14 @@ real `approve(spender, 0)` on USDC (Base mainnet) from an organisation wallet
 with a zero native balance — sponsored gas covers the fee and no tokens move.
 
 Featured market: the September 2026 FOMC rate decision (market 2252243,
-"Will the Fed decrease interest rates by 25 bps…", ~$48M volume) — resolves
-September 16, 2026, inside the hackathon window.
+"Is the Fed decreasing rates by 25 bps after the September 2026 meeting?",
+~$48M volume) — resolves September 16, 2026, inside the hackathon window.
 
 ## Environment
 
 | Variable | Purpose |
 |----------|---------|
-| `EOA_PRIVATE_KEY` | wallet that owns the positions (demo + mainnet loop) |
+| `EOA_PRIVATE_KEY` | wallet that owns the positions (local funded proof harness only) |
 | `EOA_ADDRESS` | its address (used by `demo:preflight` balance reads) |
 | `TREASURY_ADDRESS` | the enforced payout destination |
 | `KEEPERHUB_API_KEY` | org API key (`kh_…`) for simulation + sponsored execution |
@@ -135,26 +154,40 @@ September 16, 2026, inside the hackathon window.
 | `POSITION_VALUE_USDC` | position size used in staged workflows |
 | `DEMO_AMOUNT_USDC` / `DEMO_WINNER` | deterministic demo parameters (default 1 USDC) |
 
+The `EOA_PRIVATE_KEY` + sub-$1 funding is required for **our funded local proof
+harness** (the self-created CTF loop). It is not a requirement of the product.
+The product is the KeeperHub execution layer: zero-value writes and reads run
+unfunded, captured by `pnpm sanity` and `pnpm execute --simulate`.
+
 ## Security model
 
 - **On-chain gating.** Nothing executes "because the market closed". Execution
   only proceeds when `payoutDenominator` is non-zero on Polygon.
+- **Preflight the write.** Every broadcast is preceded by a live simulation;
+  anything that would revert does not get signed.
 - **Append-only ledger.** Every state change and transaction is appended to a
   replayable JSONL ledger (`src/policy/ledger.ts`); the whole history is
   reconstructable from the file.
 - **Receipt-backed.** Each execution step records its tx hash and explorer link;
   the dashboard and CLI surface them for independent verification.
-- **No secret handling in Consequence.** Consequence never signs; KeeperHub's
-  wallet infrastructure does.
+- **No secret handling in Renn.** Renn never signs; KeeperHub's wallet
+  infrastructure does.
 - **Precommitment is the control.** The destination address is fixed at ARM
   time. The payout cannot be rerouted after resolution.
 
-## What was verified on-chain
+## Evidence status
 
-- The four core Polymarket contracts exist on Polygon (`eth_getCode`).
-- The CTF ABI / function selectors are valid against the live CTF
-  (`getCollectionId`, `getPositionId`, `payoutDenominator` via `eth_call`).
-- Resolution detection: `payoutDenominator == 1` on already-resolved markets,
-  `0` on the pending FOMC market.
-- Workflow envelope composition and the ledger state machine are exercised by
-  `pnpm arm`, `pnpm status`, and the dashboard.
+- Verified on-chain (no funds needed): Polymarket contract presence, CTF ABI
+  and selectors, resolution reads on resolved markets, position ID math,
+  workflow envelope composition, ledger state machine.
+- Pending real transaction hashes: the deterministic demo loop
+  (split / resolve / redeem / route), the zero-value sponsored `sanity`
+  transaction, and the KeeperHub `execute` redemption run. These are the only
+  placeholders left in the submission packet and in the dashboard; nothing is
+  faked, everything is marked PENDING until it lands.
+
+## Detail docs
+
+- `docs/submission.md` — DoraHacks main-track submission packet.
+- `docs/arc-bounty.md` — Arc Testnet chain-registration bounty packet (PR #2230).
+- `docs/demo-script.md` — the demo video script with the evidence checklist.

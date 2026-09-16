@@ -112,7 +112,7 @@ async function arm(opts: ArmOpts): Promise<Policy> {
   });
 
   const workflow = buildRedemptionWorkflow({
-    name: `Consequence ${market.id}: ${market.slug}`,
+    name: `Renn ${market.id}: ${market.slug}`,
     description: `On resolution of "${market.question}", redeem winning shares on chain and route USDC ${positionValueUsdc} to ${opts.treasuryLabel ?? treasuryAddress}.`,
     chainNetwork: "137",
     conditionId,
@@ -516,8 +516,8 @@ async function main(): Promise<void> {
 }
 
 function printHelp(): void {
-  console.log(`Consequence — Polymarket resolution, executed by KeeperHub.
-Your prediction can be uncertain. Your financial response cannot.
+  console.log(`Renn — prediction is probabilistic, settlement isn't.
+Resolved Polymarket positions become deterministic financial execution through KeeperHub.
 
 Commands:
   market-find              list candidate markets resolving in the next 7 days

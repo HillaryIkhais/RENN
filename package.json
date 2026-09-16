@@ -1,8 +1,8 @@
 {
-  "name": "consequence",
+  "name": "renn",
   "version": "0.1.0",
   "private": true,
-  "description": "Consequence: a self-executing bridge between Polymarket resolution and KeeperHub execution. Your prediction can be uncertain. Your financial response cannot.",
+  "description": "Renn: prediction is probabilistic, settlement isn't. A self-executing bridge between Polymarket resolution and KeeperHub execution.",
   "type": "module",
   "scripts": {
     "market:find": "tsx src/index.ts market-find",

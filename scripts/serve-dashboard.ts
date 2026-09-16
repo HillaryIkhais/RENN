@@ -79,5 +79,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Consequence dashboard: http://localhost:${PORT}`);
+  console.log(`Renn dashboard: http://localhost:${PORT}`);
 });

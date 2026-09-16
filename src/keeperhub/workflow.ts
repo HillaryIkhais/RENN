@@ -252,7 +252,7 @@ export function buildRedemptionWorkflow(
   const envelope: WorkflowEnvelope = {
     name:
       opts.name ??
-      `Consequence: redeem + route (${opts.redemptionKind}) — ${opts.conditionId.slice(0, 10)}…`,
+      `Renn: redeem + route (${opts.redemptionKind}) — ${opts.conditionId.slice(0, 10)}…`,
     description:
       opts.description ??
       "Precommitted execution: when the Polymarket condition resolves, redeem winning CTF shares and route the USDC payout to the treasury. Executed deterministically by KeeperHub.",
