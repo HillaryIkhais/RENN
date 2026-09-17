@@ -16,6 +16,46 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
 };
 
+/**
+ * Aggregate real on-chain evidence: every TRANSACTION event recorded in the
+ * ledger across all policies. This is what the dashboard's LIVE MAINNET PROOF
+ * strip renders — never placeholders, only recorded execution ids + hashes.
+ */
+async function liveEvidence() {
+  const policies = reload();
+  const txns: Array<{
+    policyId: string;
+    at: string;
+    step: string;
+    txHash: string | null;
+    txLink: string | null;
+    executionId: string | null;
+    sponsored: boolean;
+    message: string;
+  }> = [];
+  for (const p of policies) {
+    for (const e of p.events) {
+      if (e.type !== "TRANSACTION") continue;
+      const hash = e.txHashes?.[0] ?? null;
+      const link = e.txLinks?.[0] ?? null;
+      const executionId = (e.meta?.executionId as string | undefined) ?? null;
+      const sponsored = (e.meta?.sponsored as boolean | undefined) ?? false;
+      txns.push({
+        policyId: p.policyId,
+        at: e.at,
+        step: e.message ?? e.type,
+        txHash: hash,
+        txLink: link,
+        executionId,
+        sponsored,
+        message: e.message ?? "",
+      });
+    }
+  }
+  txns.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  return txns;
+}
+
 async function livePolicies() {
   const policies = reload();
   const rows = [];
@@ -60,6 +100,12 @@ const server = http.createServer(async (req, res) => {
       const rows = await livePolicies();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ at: new Date().toISOString(), policies: rows }, null, 2));
+      return;
+    }
+    if (url.pathname === "/evidence") {
+      const txns = await liveEvidence();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ at: new Date().toISOString(), transactions: txns }, null, 2));
       return;
     }
 

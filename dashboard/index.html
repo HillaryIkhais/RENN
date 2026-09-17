@@ -84,6 +84,18 @@
   a { color: inherit; }
   .empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 14px; }
   .foot { margin-top: 40px; color: var(--muted); font-size: 12px; font-family: var(--mono); line-height: 1.7; }
+
+  #evidence { margin-top: 34px; border: 1px solid rgba(52,211,153,0.35); background: linear-gradient(135deg, rgba(52,211,153,0.07), rgba(99,102,241,0.05)); border-radius: 14px; padding: 16px 20px; }
+  #evidence h3 { margin: 0 0 12px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--good); }
+  .ev-list { display: flex; flex-direction: column; gap: 8px; }
+  .ev { display: flex; gap: 12px; align-items: baseline; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
+  .ev .t { color: var(--muted); white-space: nowrap; }
+  .ev .msg { color: var(--text); }
+  .ev .mono a { color: var(--accent2); text-decoration: none; }
+  .ev a:hover { text-decoration: underline; }
+  .ty.tr { color: var(--good); white-space: nowrap; width: 84px; flex: none; }
+  .ty.wa { color: var(--warn); white-space: nowrap; }
+  .ev-warn { color: var(--warn); font-family: var(--mono); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -124,10 +136,12 @@
     <div class="stage" id="st-6"><div class="idx">06</div><div class="nm">SETTLED</div><div class="desc">obligation discharged</div></div>
   </div>
 
+  <section id="evidence"></section>
   <section id="cards"></section>
 
   <div class="foot">
-    RENN v0.1 — mainnet proof build &middot; EVIDENCE PENDING (real KeeperHub execution hashes appear here as they land)<br>
+    RENN v0.1 — mainnet proof build &middot; LIVE MAINNET PROOF below (real sponsored KeeperHub execution hashes)<br>
+    PENDING LIVE VALUE LEG: nonzero USDC settlement requires ~1 USDC collateral in the org wallet (sponsored gas).<br>
     Obligation: frozen envelope -> on-chain CTF finality gate -> KeeperHub deterministic execution -> discharge &middot; Safe loop: simulate, one broadcast, poll, verify
   </div>
 </div>
@@ -201,6 +215,39 @@
 
   let data = { policies: [] };
   let heroState = "ARMED";
+  let evidenceData = { transactions: [] };
+
+  function renderEvidence() {
+    const box = $("evidence");
+    const txns = evidenceData.transactions || [];
+    const real = txns.filter((t) => t.txHash && t.sponsored);
+    const chainOf = () => "polygonscan.com/tx/";
+    const rows = real
+      .map(
+        (t) =>
+          `<div class="ev"><span class="t">${fmt(t.at)}</span><span class="ty tr">${t.sponsored ? "SPONSORED" : ""}</span>` +
+          `<span class="msg">${escapeHtml(t.message)}</span>` +
+          `<a class="mono" href="${t.txLink || "https://" + chainOf() + (t.txHash || "")}" target="_blank" rel="noreferrer">${t.txHash ? slot(t.txHash) : "—"}</a>` +
+          `${t.executionId ? `<span class="mono">${t.executionId}</span>` : ""}</div>`
+      )
+      .join("");
+    const pending = txns.some((t) => !t.txHash && !t.sponsored)
+      ? `<div class="ev-warn"><span class="ty wa">PENDING</span> recorded executions awaiting on-chain hashes</div>`
+      : "";
+    box.innerHTML = `<h3>LIVE MAINNET PROOF — real sponsored KeeperHub transactions</h3>
+      ${real.length ? `<div class="ev-list">${rows}</div>` : `<div class="ev-warn">No recorded sponsored transactions yet.</div>`}
+      ${pending}`;
+  }
+
+  async function refreshEvidence() {
+    try {
+      const r = await fetch("/evidence");
+      evidenceData = await r.json();
+      renderEvidence();
+    } catch {
+      // evidence strip stays empty rather than lying
+    }
+  }
 
   async function refresh() {
     try {
@@ -218,7 +265,9 @@
     $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ");
   }
   refresh();
+  refreshEvidence();
   setInterval(refresh, 15000);
+  setInterval(refreshEvidence, 15000);
 </script>
 </body>
 </html>

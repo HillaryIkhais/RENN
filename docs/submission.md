@@ -181,16 +181,27 @@ the redemption through the simulate → broadcast → status-poll loop in
   on real on-chain resolution and the redemption path executes through
   KeeperHub at a real finally-resolved condition — no self-created condition,
   no collateral needed.
+- **Gate proofs (zero-funding, scratch ledger, real code paths):** `pnpm proofs`
+  demonstrates both hard guarantees live:
+  1. **Obligation immutability** — tampering the beneficiary, face value, or
+     condition after locking yields a different envelope hash (keccak256), and
+     the execute path refuses with `LOCKED OBLIGATION MISMATCH`.
+  2. **Finality gate** — a policy in `WAITING_FINALITY` is refused before any
+     broadcast: `SETTLEMENT BLOCKED … No irreversible obligation fires on a
+     preliminary result`. The FOMC market is confirmed **finally resolved on
+     chain (denom 1, YES wins)**, so the same gate demonstrably *opens* for a
+     real conditional payment once the world resolves.
 
 **PENDING — requires ~1 USDC in the org wallet on Polygon (sponsored gas):**
 - `pnpm prototype --beneficiary=…` — the full six-hop KeeperHub-executed
   lifecycle above. This is the transaction evidence the rubric asks for; every
-  hop lands a real hash into the evidence table below.
+  hop lands a real hash into the evidence table below. The dashboard renders
+  the **LIVE VALUE SETTLEMENT: pending ~1 USDC collateral** card until then.
 
-**PENDING — blocked by design until FOMC finality:**
-- `pnpm execute --policy-id=policy-2252243` redemption; the gate refuses to run
-  it while the payout state is provisional, which is the safety property being
-  demonstrated.
+**Note — FOMC is now finally resolved on-chain** (denom 1, YES wins); the
+safety property is no longer "blocked on a provisional number" for that
+specific market (its gate is open), so the demo uses the scratch-ledger gate
+proof for the blocked branch and the Layer-1 hashes for the open branch.
 
 **Sub-$1 funded local harness (cross-check only, NOT the product):**
 - The deterministic demo loop's hashes (~0.06-0.23 POL + 1 USDC principal,
@@ -214,9 +225,10 @@ No server, no bot network, no cloud dependency.
 
 ## Demo video script
 
-See `docs/demo-script.md` (3-minute capture script). Footer of the dashboard
-and every evidence block is marked **EVIDENCE PENDING** until real hashes are
-inserted; no fake receipts, no fake live execution.
+See `docs/demo-script.md` (3-minute capture script). The dashboard's
+**LIVE MAINNET PROOF** strip renders recorded sponsored hashes directly from
+the ledger; the value-settlement leg is marked **pending ~1 USDC collateral**
+until it lands. No fake receipts, no fake live execution.
 
 ## Transaction / evidence placeholders
 
@@ -226,8 +238,9 @@ inserted; no fake receipts, no fake live execution.
 | Layer-1: `approve(CTF, 0)` (Polygon) | `pnpm zero-value --resolved=…` | **DONE** — `0x1579c791…264a` (sponsored) |
 | Layer-1: `redeemPositions` (real resolved condition, gate OPEN) | `pnpm zero-value --resolved=…` | **DONE** — `0xc7953f32…ff77` (sponsored) |
 | Layer-1: `transfer(0)` to beneficiary | `pnpm zero-value --resolved=…` | **DONE** — `0x2c453a77…f45b1` (sponsored) |
+| Gate proofs (immutability + blocked) | `pnpm proofs` | **DONE** — both outputs verified (zero-funding) |
 | Prototype: full lifecycle (approve/create/split/block/resolve/redeem/route) | `pnpm prototype` | PENDING (~1 USDC in org wallet) |
-| FOMC redemption execution | `pnpm execute --policy-id=policy-2252243` | PENDING (blocked until final) |
+| Live-value settle on resolved FOMC (denom 1, YES wins) | `pnpm execute --policy-id=policy-2252243` | PENDING (~1 USDC + gate open on chain) |
 | Local demo loop (5 hashes) | `pnpm demo:*` | PENDING (optional cross-check) |
 | On-chain resolution + ABI + finality-gate verification | README "Evidence status" | DONE |
 

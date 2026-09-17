@@ -180,6 +180,8 @@ pnpm watch                            # poll: provisional -> WAITING_FINALITY (b
 pnpm execute --policy-id=<policy-id>  # settle only the frozen obligation (finality + hash verified)
 pnpm sanity                           # zero-value sponsored execution proof (empty wallet, real tx)
 pnpm prototype --beneficiary=<addr>   # full KeeperHub-executed lifecycle (sponsored)
+pnpm proofs                           # zero-funding gate proofs: obligation immutability + blocked execute
+pnpm zero-value --resolved=<cond> --parent=<parent> [--beneficiary=<addr>]   # Layer-1 proof on a really-resolved condition
 ```
 
 `execute` refuses two things before it ever broadcasts: a **provisional
@@ -266,17 +268,29 @@ nothing is faked.
   finality gate opens only on real on-chain resolution and the redemption path
   executes through KeeperHub at a real finally-resolved condition — without
   self-creating a condition or needing collateral.
+- **DONE — gate proofs (`pnpm proofs`, zero-funding):** two hard guarantees
+  demonstrated live from the same modules the product uses, against a scratch
+  ledger (`.data/proofs/`): (1) obligation immutability — tampering the
+  beneficiary, face value, or condition after locking yields a different
+  envelope hash and the execute path refuses (`LOCKED OBLIGATION MISMATCH`);
+  (2) finality gate — a `WAITING_FINALITY` policy is refused before any
+  broadcast (`SETTLEMENT BLOCKED … No irreversible obligation fires on a
+  preliminary result`). The FOMC market is now **finally resolved on-chain
+  (denom 1, YES wins)**, so the same gate demonstrably *opens* for the real
+  conditional payment.
 - Evidence path to a filled paper trail:
   1. `pnpm prototype --beneficiary=…` — the full six-hop lifecycle
      (approve/create/split/block/resolve/redeem/route) executed by KeeperHub.
      **Marked PENDING** until ~1 USDC collateral sits in the org wallet
      `0x9f7d…e6fc` on Polygon; gas is sponsored.
-  2. The FOMC policy `pnpm execute --policy-id=policy-2252243` redemption run
-     (**PENDING** until on-chain payout state is final — the gate is designed
-     to block it meanwhile).
+  2. Live-value settlement on the FOMC policy (`pnpm execute
+     --policy-id=policy-2252243`): gate is OPEN on chain now (denom 1); still
+     needs ~1 USDC to move; **marked PENDING** until the wallet is funded.
   3. The funded local demo loop (EOA 0x…74e1, ~2 USDC) as a cross-check of the
      same mechanism with no KeeperHub dependency.
-- Dashboard ships with PENDING markers for any missing hashes.
+- Dashboard ships with a **LIVE MAINNET PROOF** strip (real recorded sponsored
+  hashes from the ledger) and a **pending ~1 USDC collateral** card for the
+  value-settlement leg. PENDING markers for any still-missing hashes.
 
 ## Detail docs
 
