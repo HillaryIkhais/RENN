@@ -3,353 +3,1132 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Renn — prediction is probabilistic, settlement isn't</title>
+<title>Renn — Prediction is probabilistic. Settlement isn't.</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
   :root {
-    --bg: #07090d;
-    --panel: rgba(255,255,255,0.035);
-    --panel-border: rgba(255,255,255,0.09);
-    --text: #e8ecf3;
-    --muted: #8b93a5;
-    --accent: #6366f1;
-    --accent2: #22d3ee;
-    --good: #34d399;
-    --warn: #fbbf24;
-    --bad: #f87171;
+    --bg: #000000;
+    --surface: #080808;
+    --surface2: #111111;
+    --border: rgba(255,255,255,0.06);
+    --border-hover: rgba(255,255,255,0.14);
+    --text: #ebebeb;
+    --muted: #6b6b6b;
+    --accent: #c8ff00;
     --mono: "JetBrains Mono", ui-monospace, monospace;
+    --serif: "Instrument Serif", Georgia, serif;
+    --sans: "Inter", system-ui, sans-serif;
   }
-  * { box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    margin: 0;
-    background:
-      radial-gradient(1200px 500px at 70% -10%, rgba(99,102,241,0.14), transparent 60%),
-      radial-gradient(900px 500px at 10% 0%, rgba(34,211,238,0.08), transparent 55%),
-      var(--bg);
+    background: var(--bg);
     color: var(--text);
-    font-family: "Inter", system-ui, sans-serif;
-    min-height: 100vh;
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
   }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 28px 80px; }
-  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
-  .brand { display: flex; flex-direction: column; gap: 6px; }
-  .logo { display: flex; align-items: baseline; gap: 12px; }
-  .logo .name { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
-  .logo .mono { font-family: var(--mono); color: var(--accent2); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; }
-  .tagline { color: var(--muted); font-size: 15px; max-width: 640px; }
-  .tagline b { color: var(--text); }
-  .status-pill { display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--muted); flex-wrap: wrap; justify-content: flex-end; }
-  .pill { border: 1px solid var(--panel-border); background: var(--panel); padding: 6px 10px; border-radius: 999px; display: inline-flex; gap: 7px; align-items: center; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .dot.ok { background: var(--good); box-shadow: 0 0 8px var(--good); }
-  .dot.err { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
 
-  .pipeline { margin-top: 34px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .stage { flex: 1; min-width: 130px; border: 1px solid var(--panel-border); background: var(--panel); border-radius: 12px; padding: 12px 14px; position: relative; }
-  .stage .idx { font-family: var(--mono); font-size: 10px; color: var(--muted); }
-  .stage .nm { font-size: 13px; font-weight: 600; margin-top: 3px; }
-  .stage .desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .stage.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px rgba(99,102,241,0.25); }
-  .stage.done { border-color: rgba(52,211,153,0.5); }
-  .arrow { color: var(--muted); font-family: var(--mono); }
+  /* --- NAV --- */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 48px;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+  .nav-left { display: flex; align-items: center; gap: 32px; }
+  .logo-mark {
+    display: flex; align-items: center; gap: 10px;
+    text-decoration: none; color: var(--text);
+  }
+  .logo-icon {
+    width: 32px; height: 32px;
+  }
+  .logo-icon path { fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .logo-icon .check { stroke: var(--accent); stroke-width: 2.5; }
+  .logo-text {
+    font-family: var(--serif);
+    font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+  .nav-links { display: flex; gap: 28px; align-items: center; }
+  .nav-links a {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 400;
+    text-decoration: none;
+    transition: color 0.25s;
+    letter-spacing: 0.01em;
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .nav-dots { display: flex; gap: 6px; align-items: center; }
+  .ndot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #333; transition: all 0.5s;
+  }
+  .ndot.ok { background: var(--accent); box-shadow: 0 0 8px rgba(200,255,0,0.5); }
+  .ndot.err { background: #ff3b3b; box-shadow: 0 0 8px rgba(255,59,59,0.5); }
+  #clock {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
 
-  .boundary { margin-top: 20px; display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
-  .b-cell { border: 1px solid var(--panel-border); background: var(--panel); border-radius: 10px; padding: 10px 16px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-  .b-cell:nth-child(3) { border-color: rgba(34,211,238,0.4); color: var(--accent2); }
-  .b-arrow { color: var(--muted); font-family: var(--mono); }
+  /* --- HERO --- */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    padding: 0 48px;
+    overflow: hidden;
+  }
+  .hero-content {
+    position: relative;
+    z-index: 3;
+    max-width: 620px;
+  }
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .hero-eyebrow::before {
+    content: "";
+    width: 32px;
+    height: 1px;
+    background: var(--muted);
+  }
+  .hero h1 {
+    font-family: var(--serif);
+    font-size: clamp(52px, 7vw, 90px);
+    font-weight: 400;
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    color: var(--text);
+  }
+  .hero h1 em {
+    font-style: italic;
+    color: var(--accent);
+    text-shadow: 0 0 60px rgba(200,255,0,0.15);
+  }
+  .hero-sub {
+    margin-top: 28px;
+    font-size: 16px;
+    font-weight: 300;
+    line-height: 1.75;
+    color: var(--muted);
+    max-width: 460px;
+  }
+  .hero-sub b { color: var(--text); font-weight: 500; }
+  .hero-cta {
+    margin-top: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 32px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    text-decoration: none;
+    transition: all 0.3s ease;
+    background: transparent;
+    letter-spacing: 0.02em;
+  }
+  .hero-cta:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.25);
+    transform: translateY(-1px);
+  }
+  .hero-cta svg { width: 14px; height: 14px; }
+  #hero-canvas {
+    position: absolute;
+    top: -5%; right: -5%; bottom: -5%;
+    width: 65%;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.85;
+  }
 
-  .chain { margin-top: 20px; border: 1px solid rgba(52,211,153,0.35); background: var(--panel); border-radius: 14px; padding: 16px 20px; }
-  .chain h3 { margin: 0 0 4px; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--good); }
-  .chain .chain-sub { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .chain .leg { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; padding: 9px 0; border-top: 1px dashed var(--panel-border); }
-  .chain .leg:first-of-type { border-top: none; }
-  .chain .no { color: var(--muted); }
-  .chain .oid { color: var(--accent2); }
-  .chain .st { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--panel-border); text-transform: uppercase; font-size: 10.5px; }
-  .chain .st.SETTLED { color: var(--good); border-color: rgba(52,211,153,0.5); }
-  .chain .unlock { color: var(--accent2); }
-  .chain .closed { margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--good); }
+  /* --- SECTION --- */
+  section {
+    padding: 120px 48px;
+    max-width: 1200px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-label::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: var(--muted);
+  }
+  .section-title {
+    font-family: var(--serif);
+    font-size: clamp(36px, 4.5vw, 58px);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    max-width: 640px;
+  }
+  .section-title em { color: var(--accent); font-style: italic; }
+  .section-desc {
+    margin-top: 18px;
+    font-size: 15px;
+    font-weight: 300;
+    line-height: 1.75;
+    color: var(--muted);
+    max-width: 520px;
+  }
 
-  .card { margin-top: 26px; border: 1px solid var(--panel-border); background: var(--panel); border-radius: 14px; overflow: hidden; }
-  .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
-  .card-head .q { font-size: 15px; font-weight: 600; line-height: 1.35; }
-  .card-head .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
-  .badge { font-family: var(--mono); font-size: 11px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--panel-border); text-transform: uppercase; letter-spacing: 0.06em; }
-  .badge.ARMED { color: var(--warn); border-color: rgba(251,191,36,0.4); }
-  .badge.LOCKED { color: var(--accent2); border-color: rgba(34,211,238,0.4); }
-  .badge.WAITING_FINALITY { color: var(--bad); border-color: rgba(248,113,113,0.55); animation: pulse 1.6s infinite; }
-  .badge.RESOLVED { color: var(--accent); border-color: rgba(99,102,241,0.5); }
-  .badge.EXECUTING { color: var(--warn); border-color: rgba(251,191,36,0.5); }
-  .badge.VERIFYING { color: var(--accent2); border-color: rgba(34,211,238,0.6); animation: pulse 1.6s infinite; }
-  .badge.SETTLED { color: var(--good); border-color: rgba(52,211,153,0.5); }
-  .badge.FAILED, .badge.EXPIRED { color: var(--bad); border-color: rgba(248,113,113,0.5); }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  /* --- DIVIDER --- */
+  .divider {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 48px;
+  }
+  .divider-line {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border) 20%, var(--border) 80%, transparent);
+  }
 
-  .card-body { padding: 18px 20px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 22px; }
+  /* --- PIPELINE --- */
+  .pipeline-grid {
+    margin-top: 64px;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  @media (max-width: 900px) { .pipeline-grid { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 560px) { .pipeline-grid { grid-template-columns: repeat(2, 1fr); } }
+  .pipe-step {
+    background: var(--surface);
+    padding: 32px 24px;
+    position: relative;
+    transition: all 0.4s ease;
+  }
+  .pipe-step:hover { background: var(--surface2); }
+  .pipe-step.active {
+    background: rgba(200,255,0,0.03);
+    box-shadow: inset 0 0 40px rgba(200,255,0,0.03);
+  }
+  .pipe-step.done .pipe-name { color: var(--accent); }
+  .pipe-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 16px;
+    letter-spacing: 0.08em;
+    opacity: 0.6;
+  }
+  .pipe-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+    transition: color 0.3s;
+  }
+  .pipe-desc {
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .pipe-step.active .pipe-name { color: var(--accent); }
+  .pipe-step.active::after {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgba(200,255,0,0.4);
+  }
+
+  /* --- EVIDENCE --- */
+  .evidence-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px;
+    margin-top: 80px;
+    position: relative;
+    overflow: hidden;
+  }
+  .evidence-section::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(200,255,0,0.3), transparent);
+  }
+  .evidence-section h3 {
+    font-family: var(--serif);
+    font-size: 32px;
+    font-weight: 400;
+    line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  .ev-sub {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.65;
+    margin-bottom: 28px;
+    max-width: 600px;
+  }
+  .ev-sub b { color: var(--text); }
+  .ev-list { display: flex; flex-direction: column; }
+  .ev {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  .ev:first-child { border-top: none; }
+  .ev .t { color: var(--muted); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+  .ev .tag {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(200,255,0,0.25);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .ev .msg { color: var(--text); flex: 1; font-weight: 300; }
+  .ev a {
+    color: var(--muted);
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    transition: color 0.2s;
+  }
+  .ev a:hover { color: var(--text); }
+  .ev-pending {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px dashed rgba(251,191,36,0.2);
+    font-size: 12.5px;
+    color: #fbbf24;
+    font-family: var(--mono);
+    letter-spacing: 0.02em;
+  }
+  .ev-pending .hl { color: #38bdf8; }
+
+  /* --- CHAIN --- */
+  .chain-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px;
+    margin-top: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .chain-section::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(200,255,0,0.3), transparent);
+  }
+  .chain-section h3 {
+    font-family: var(--serif);
+    font-size: 32px;
+    font-weight: 400;
+    line-height: 1.15;
+    margin-bottom: 10px;
+  }
+  .chain-sub {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.65;
+    margin-bottom: 28px;
+    max-width: 600px;
+  }
+  .chain-leg {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 18px 0;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  .chain-leg:first-of-type { border-top: none; }
+  .chain-leg .num { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .chain-leg .id { font-family: var(--mono); font-size: 12px; color: #38bdf8; }
+  .chain-leg .st {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .chain-leg .st.SETTLED { color: var(--accent); border-color: rgba(200,255,0,0.3); }
+  .chain-leg .unlock { font-family: var(--mono); font-size: 11px; color: #38bdf8; }
+  .chain-closed {
+    margin-top: 20px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+
+  /* --- CARDS --- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    margin-top: 20px;
+    transition: border-color 0.3s;
+  }
+  .card:hover { border-color: var(--border-hover); }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 28px 32px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .card-head .q { font-size: 15px; font-weight: 500; line-height: 1.4; }
+  .card-head .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+    letter-spacing: 0.02em;
+  }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+  .badge.ARMED { color: #fbbf24; border-color: rgba(251,191,36,0.25); }
+  .badge.LOCKED { color: #38bdf8; border-color: rgba(56,189,248,0.25); }
+  .badge.WAITING_FINALITY { color: #f87171; border-color: rgba(248,113,113,0.25); animation: pulse 2s infinite; }
+  .badge.RESOLVED { color: #a78bfa; border-color: rgba(167,139,250,0.25); }
+  .badge.EXECUTING { color: #fbbf24; border-color: rgba(251,191,36,0.25); }
+  .badge.VERIFYING { color: #38bdf8; border-color: rgba(56,189,248,0.3); animation: pulse 2s infinite; }
+  .badge.SETTLED { color: var(--accent); border-color: rgba(200,255,0,0.25); }
+  .badge.FAILED, .badge.EXPIRED { color: #f87171; border-color: rgba(248,113,113,0.25); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  .card-body {
+    padding: 28px 32px;
+    display: grid;
+    grid-template-columns: 1fr 1.8fr;
+    gap: 32px;
+  }
   @media (max-width: 760px) { .card-body { grid-template-columns: 1fr; } }
-  .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; font-size: 13px; }
-  .kv .k { color: var(--muted); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 1px; }
-  .kv .v { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
-  .kv .v.good { color: var(--good); }
-  .log { font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow: auto; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; font-size: 13px; }
+  .kv .k {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding-top: 2px;
+  }
+  .kv .v { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  .kv .v.good { color: var(--accent); }
+  .log {
+    font-family: var(--mono);
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #222 transparent;
+  }
   .log .row { display: flex; gap: 10px; align-items: baseline; }
-  .log .t { color: var(--muted); white-space: nowrap; }
-  .log .ty { color: var(--accent2); white-space: nowrap; width: 84px; flex: none; }
-  .log .msg { color: var(--text); }
-  .log a { color: var(--accent2); text-decoration: none; }
+  .log .t { color: #444; white-space: nowrap; }
+  .log .ty { color: #38bdf8; white-space: nowrap; width: 96px; flex: none; }
+  .log .msg { color: var(--text); opacity: 0.8; }
+  .log a { color: #38bdf8; text-decoration: none; }
   .log a:hover { text-decoration: underline; }
-  a { color: inherit; }
-  .empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 14px; }
-  .foot { margin-top: 40px; color: var(--muted); font-size: 12px; font-family: var(--mono); line-height: 1.7; }
+  .empty { color: var(--muted); text-align: center; padding: 80px 0; font-size: 14px; }
 
-  #evidence { margin-top: 34px; border: 1px solid rgba(52,211,153,0.35); background: linear-gradient(135deg, rgba(52,211,153,0.07), rgba(99,102,241,0.05)); border-radius: 14px; padding: 16px 20px; }
-  #evidence h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--good); }
-  .ev-sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
-  .ev-pending { margin-top: 12px; border-top: 1px dashed rgba(251,191,36,0.35); padding-top: 10px; font-size: 12.5px; color: var(--warn); }
-  .ev-pending .mono { color: var(--accent2); }
-  .ev-list { display: flex; flex-direction: column; gap: 8px; }
-  .ev { display: flex; gap: 12px; align-items: baseline; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
-  .ev .t { color: var(--muted); white-space: nowrap; }
-  .ev .msg { color: var(--text); }
-  .ev .mono a { color: var(--accent2); text-decoration: none; }
-  .ev a:hover { text-decoration: underline; }
-  .ty.tr { color: var(--good); white-space: nowrap; width: 84px; flex: none; }
-  .ty.wa { color: var(--warn); white-space: nowrap; }
-  .ev-warn { color: var(--warn); font-family: var(--mono); font-size: 12px; }
+  /* --- FOOTER --- */
+  footer {
+    padding: 80px 48px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .foot-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+  .foot-brand {
+    font-family: var(--serif);
+    font-size: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .foot-brand svg { width: 28px; height: 28px; }
+  .foot-brand span { display: block; font-family: var(--sans); font-size: 12px; color: var(--muted); font-weight: 300; margin-top: 6px; letter-spacing: 0.02em; }
+  .foot-cols { display: flex; gap: 56px; }
+  .foot-col {}
+  .foot-col h4 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .foot-col a, .foot-col div {
+    display: block;
+    font-size: 13px;
+    color: #888;
+    text-decoration: none;
+    line-height: 2;
+    transition: color 0.2s;
+  }
+  .foot-col a:hover { color: var(--text); }
+  .foot-bottom {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: #444;
+    line-height: 1.9;
+    letter-spacing: 0.02em;
+  }
+
+  /* --- ANIMATIONS --- */
+  .fade-up {
+    opacity: 0;
+    transform: translateY(32px);
+    transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .fade-up.visible { opacity: 1; transform: translateY(0); }
+  .fade-up.delay-1 { transition-delay: 0.1s; }
+  .fade-up.delay-2 { transition-delay: 0.2s; }
+  .fade-up.delay-3 { transition-delay: 0.3s; }
+  a { color: inherit; }
+
+  /* --- GRAIN OVERLAY --- */
+  .grain {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 256px 256px;
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand">
-      <div class="logo">
-        <span class="name">Renn</span>
-        <span class="mono">KeeperHub &times; Polymarket</span>
-      </div>
-      <div class="tagline">
-        Prediction is probabilistic. <b>Settlement isn't.</b><br>
-        Renn turns a Polymarket position into a <b>finality-gated obligation</b>: the
-        beneficiary, amount and settlement workflow are frozen before the outcome is
-        known; when the on-chain payout state is final, KeeperHub executes exactly that
-        settlement — and nothing else.
-      </div>
+<div class="grain"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-left">
+    <a href="#" class="logo-mark">
+      <svg class="logo-icon" viewBox="0 0 32 32">
+        <path d="M6 26V6h8c5.5 0 9 3.5 9 8s-3.5 8-9 8H6" />
+        <path d="M16 14l8 12" class="check" />
+        <path d="M20 26h8" class="check" />
+      </svg>
+      <span class="logo-text">Renn</span>
+    </a>
+    <div class="nav-links">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#proof">Proof</a>
+      <a href="#chain">Chain</a>
     </div>
-    <div class="status-pill">
-      <span class="pill"><span id="s-poly" class="dot"></span>Polygon</span>
-      <span class="pill"><span id="s-gamma" class="dot"></span>Gamma</span>
-      <span class="pill"><span id="s-kh" class="dot"></span>KeeperHub</span>
-      <span class="pill"><span id="clock" class="mono">--</span></span>
+  </div>
+  <div class="nav-right">
+    <div class="nav-dots">
+      <span class="ndot" id="s-poly" title="Polygon"></span>
+      <span class="ndot" id="s-kh" title="KeeperHub"></span>
     </div>
-  </header>
-
-  <div class="pipeline">
-    <div class="stage" id="st-1"><div class="idx">01</div><div class="nm">ARMED</div><div class="desc">obligation declared</div></div>
-    <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-2"><div class="idx">02</div><div class="nm">LOCKED</div><div class="desc">envelope frozen</div></div>
-    <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-3"><div class="idx">03</div><div class="nm">WAITING FINALITY</div><div class="desc">settlement blocked</div></div>
-    <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-4"><div class="idx">04</div><div class="nm">RESOLVED</div><div class="desc">outcome final</div></div>
-    <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-5"><div class="idx">05</div><div class="nm">EXECUTING</div><div class="desc">keeper settles</div></div>
-    <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-6"><div class="idx">06</div><div class="nm">VERIFYING</div><div class="desc">independent check</div></div>
-    <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-7"><div class="idx">07</div><div class="nm">SETTLED</div><div class="desc">obligation discharged</div></div>
+    <span id="clock"></span>
   </div>
+</nav>
 
-  <div class="boundary">
-    <div class="b-cell">AGENT PROPOSES</div>
-    <span class="b-arrow">&#8595;</span>
-    <div class="b-cell">RENN DETERMINISTIC GATE</div>
-    <span class="b-arrow">&#8595;</span>
-    <div class="b-cell">KEEPERHUB EXECUTES</div>
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-content fade-up">
+    <div class="hero-eyebrow">Polygon Mainnet &middot; Live</div>
+    <h1>
+      PAYMENT 1<br>
+      <span style="font-size: 0.5em; opacity: 0.5;">↓</span><br>
+      <em>PROOF OF SETTLEMENT</em><br>
+      <span style="font-size: 0.5em; opacity: 0.5;">↓</span><br>
+      PAYMENT 2 UNLOCKED
+    </h1>
+    <p class="hero-sub" style="font-size: 24px; font-weight: 500; color: var(--text);">
+      Settlement is not a receipt. It is permission.
+    </p>
+    <p class="hero-sub" style="margin-top: 40px; font-family: var(--mono); font-size: 13px;">
+      <b style="color: var(--accent);">POLYMARKET EVENT</b><br><br>
+      Final &rarr; Obligation locked &rarr; KeeperHub executes &rarr; USDC transfer verified &rarr; Next obligation unlocked
+    </p>
+    <a href="#proof" class="hero-cta">
+      See live proof
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+    </a>
   </div>
-
-  <section id="chain"></section>
-  <section id="evidence"></section>
-  <section id="cards"></section>
-
-  <div class="foot">
-    RENN v0.1 — mainnet proof build<br>
-    LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE &middot; real sponsored KeeperHub execution hashes (empty org wallet)<br>
-    NONZERO SETTLEMENT — PENDING COLLATERAL &middot; requires ~1 USDC in the org wallet; not claimed as completed<br>
-    Obligation: frozen envelope -> on-chain CTF finality gate -> KeeperHub deterministic execution -> independent postcondition verify -> discharge
-  </div>
+  <canvas id="hero-canvas"></canvas>
 </div>
 
+<!-- PIPELINE -->
+<div class="divider"><div class="divider-line"></div></div>
+<section id="pipeline">
+  <div class="fade-up">
+    <div class="section-label">Separation of Concerns</div>
+    <div class="section-title">Architecture.<br><em>Impossible to miss.</em></div>
+    <p class="section-desc">
+      Renn owns the decision state machine. KeeperHub owns execution.
+    </p>
+  </div>
+  <div class="pipeline-grid fade-up delay-1" style="grid-template-columns: repeat(3, 1fr);">
+    <div class="pipe-step" style="opacity:1"><div class="pipe-name" style="font-size:16px; color:var(--text);">RENN DECIDES</div>
+      <ul style="margin-top:16px; padding-left:20px; font-size:13px; color:var(--muted); line-height:2;">
+        <li>finality</li>
+        <li>obligation</li>
+        <li>beneficiary</li>
+        <li>amount</li>
+        <li>dependency</li>
+        <li>proof</li>
+      </ul>
+    </div>
+    <div class="pipe-step" style="opacity:1"><div class="pipe-name" style="font-size:16px; color:#fbbf24;">KEEPERHUB EXECUTES</div>
+      <ul style="margin-top:16px; padding-left:20px; font-size:13px; color:var(--muted); line-height:2;">
+        <li>simulation</li>
+        <li>broadcast</li>
+        <li>gas</li>
+        <li>transaction</li>
+        <li>receipt</li>
+      </ul>
+    </div>
+    <div class="pipe-step" style="opacity:1"><div class="pipe-name" style="font-size:16px; color:var(--accent);">RENN PROVES</div>
+      <ul style="margin-top:16px; padding-left:20px; font-size:13px; color:var(--muted); line-height:2;">
+        <li>finality</li>
+        <li>exact transfer</li>
+        <li>beneficiary</li>
+        <li>amount</li>
+        <li>predecessor proof</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- EVIDENCE -->
+<div class="divider"><div class="divider-line"></div></div>
+<section id="proof">
+  <div class="fade-up">
+    <div class="section-label">Live Mainnet Execution Proof</div>
+    <div class="section-title">Zero asset value.<br><em>Real execution.</em></div>
+  </div>
+  <div class="evidence-section fade-up delay-1">
+    <div class="ev-sub">
+      Every transaction below is real and sponsored on Polygon mainnet, but moves
+      <b>zero USDC</b> (empty org wallet). It proves finality-gated KeeperHub
+      execution — it does not yet prove value settlement.
+    </div>
+    <div class="ev-list" id="ev-list"></div>
+    <div class="ev-pending">
+      <span style="color:#fbbf24">NONZERO SETTLEMENT — PENDING COLLATERAL</span>
+      requires ~1 USDC in the org wallet <span class="hl">0x9f7d…e6fc</span>;
+      blocked until then, shown honestly.
+    </div>
+  </div>
+</section>
+
+<!-- CHAIN -->
+<div class="divider"><div class="divider-line"></div></div>
+<section id="chain">
+  <div id="chain-box"></div>
+</section>
+
+<!-- CARDS -->
+<div class="divider"><div class="divider-line"></div></div>
+<section id="cards-section">
+  <div class="fade-up">
+    <div class="section-label">Obligations</div>
+    <div class="section-title">Frozen commitments,<br><em>proven on chain.</em></div>
+  </div>
+  <div id="cards" style="margin-top:48px"></div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="foot-top">
+    <div>
+      <div class="foot-brand">
+        <svg viewBox="0 0 32 32" style="width:28px;height:28px">
+          <path d="M6 26V6h8c5.5 0 9 3.5 9 8s-3.5 8-9 8H6" fill="none" stroke="#ebebeb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M16 14l8 12" fill="none" stroke="#c8ff00" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M20 26h8" fill="none" stroke="#c8ff00" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        Renn
+      </div>
+      <span>Prediction is probabilistic. Settlement isn't.</span>
+    </div>
+    <div class="foot-cols">
+      <div class="foot-col">
+        <h4>Protocol</h4>
+        <a href="https://github.com/HillaryIkhais/RENN" target="_blank">GitHub</a>
+        <a href="https://polygonscan.com/address/0x4D97DCd97eC945f40cF65F87097ACe5EA0476045" target="_blank">CTF Contract</a>
+        <a href="https://keepers.art" target="_blank">KeeperHub</a>
+      </div>
+      <div class="foot-col">
+        <h4>Network</h4>
+        <div>Polygon Mainnet</div>
+        <div>USDC 0x3c49…3359</div>
+        <div>CTF 0x4D97…045</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot-bottom">
+    RENN v0.1 — mainnet proof build<br>
+    LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE · real sponsored KeeperHub execution hashes (empty org wallet)<br>
+    NONZERO SETTLEMENT — PENDING COLLATERAL · requires ~1 USDC in the org wallet; not claimed as completed
+  </div>
+</footer>
+
 <script>
-  const $ = (id) => document.getElementById(id);
-  const fmt = (h) => h ? h.slice(0, 10) + " " + h.slice(11, 19) : "";
-  const STAGES = ["ARMED", "LOCKED", "WAITING_FINALITY", "RESOLVED", "EXECUTING", "VERIFYING", "SETTLED"];
+// --- THREE.JS: RENN GRAVITY WELL VISUAL ---
+(function() {
+  const canvas = document.getElementById('hero-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x000000, 0);
 
-  function linkify(msg) {
-    return msg.replace(/(0x[a-fA-F0-9]{64})/g, '<a href="https://polygonscan.com/tx/$1" target="_blank" rel="noreferrer">$1</a>');
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(0, 0, 4.5);
+
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const w = rect.width * 0.65;
+    const h = rect.height;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // --- ORBITAL RING SYSTEM ---
+  const ringGroup = new THREE.Group();
+  scene.add(ringGroup);
+
+  function createRing(innerR, outerR, segments, color, opacity) {
+    const geo = new THREE.RingGeometry(innerR, outerR, segments);
+    const mat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: opacity,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    return mesh;
   }
 
-  function frames() {
-    const grid = $("cards");
-    grid.innerHTML = "";
-    if (!data.policies?.length) {
-      grid.innerHTML = '<div class="empty">No policies armed. Run <span class="mono">pnpm arm --market=&lt;id&gt; --treasury=&lt;addr&gt;</span></div>';
-      return;
-    }
-    for (const p of data.policies) {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <div class="card-head">
-          <div>
-            <div class="q">${escapeHtml(p.question || p.policyId)}</div>
-            <div class="meta">${p.policyId} &middot; ${p.faceValueUsdc || p.positionValueUsdc || "—"} USDC obligation &middot; condition ${slot(p.conditionId)}${p.state === "WAITING_FINALITY" ? " &middot; SETTLEMENT BLOCKED" : ""}</div>
-          </div>
-          <span class="badge ${p.state}">${p.state}</span>
-        </div>
-        <div class="card-body">
-          <div class="kv">
-            <span class="k">Obligation</span><span class="v">${p.faceValueUsdc || p.positionValueUsdc || "—"} USDC</span>
-            <span class="k">Beneficiary</span><span class="v">${slot(p.treasury)}${p.treasuryLabel ? " " + escapeHtml(p.treasuryLabel) : ""}</span>
-            <span class="k">Finality</span><span class="v">${p.finality || "on-chain-ctf"}${p.state === "WAITING_FINALITY" ? ' <b style="color:var(--bad)">(BLOCKED)</b>' : ""}</span>
-            <span class="k">Obligation hash</span><span class="v">${p.obligationHash ? slot(p.obligationHash) : "—"}</span>
-            <span class="k">Resolution</span><span class="v ${p.resolution.resolved ? "good" : ""}">${p.resolution.text}${p.resolution.denominator !== "?" ? " (denom " + p.resolution.denominator + ")" : ""}</span>
-            <span class="k">Execution</span><span class="v">KeeperHub workflow frozen</span>
-          </div>
-          <div class="log">${p.events.map((e) => `
-            <div class="row">
-              <span class="t">${fmt(e.at)}</span>
-              <span class="ty">${e.type}</span>
-              <span class="msg">${linkify(escapeHtml(e.message || ""))}${(e.txHashes || []).map((th) => ` <a href="https://polygonscan.com/tx/${th}" target="_blank" rel="noreferrer">tx ${slot(th)}</a>`).join("")}</span>
-            </div>`).join("")}</div>
-        </div>`;
-      grid.appendChild(card);
-    }
+  const rings = [];
+  for (let i = 0; i < 6; i++) {
+    const r = 0.8 + i * 0.28;
+    const ring = createRing(r, r + 0.015, 128, 0xffffff, 0.06 + (5 - i) * 0.015);
+    ring.rotation.x = Math.PI * 0.45 + (i * 0.08);
+    ring.rotation.z = i * 0.12;
+    ringGroup.add(ring);
+    rings.push({ mesh: ring, baseR: r, speed: 0.02 + i * 0.008, tilt: Math.random() * 0.3 });
   }
 
-  function renderPipeline() {
-    let which = -1;
-    for (let i = 0; i < STAGES.length; i++) {
-      if (heroState === STAGES[i]) which = i;
-    }
-    for (let i = 1; i <= 7; i++) {
-      const st = $("st-" + i);
-      st.classList.remove("active", "done");
-      if (i < which) st.classList.add("done");
-      if (i === which) st.classList.add("active");
-    }
+  // --- PARTICLE STREAM (flowing along rings) ---
+  const pCount = 4000;
+  const pGeo = new THREE.BufferGeometry();
+  const pPos = new Float32Array(pCount * 3);
+  const pSizes = new Float32Array(pCount);
+  const pAlphas = new Float32Array(pCount);
+  const pRingIdx = new Float32Array(pCount);
+  const pAngle = new Float32Array(pCount);
+  const pSpeed = new Float32Array(pCount);
+  const pRadius = new Float32Array(pCount);
+
+  for (let i = 0; i < pCount; i++) {
+    const ri = Math.floor(Math.random() * 6);
+    const r = 0.8 + ri * 0.28 + (Math.random() - 0.5) * 0.12;
+    const a = Math.random() * Math.PI * 2;
+    const tilt = Math.PI * 0.45 + ri * 0.08;
+    const twist = ri * 0.12;
+
+    const x = r * Math.cos(a);
+    const y = r * Math.sin(a) * Math.cos(tilt);
+    const z = r * Math.sin(a) * Math.sin(tilt);
+
+    // Apply twist
+    const cosT = Math.cos(twist), sinT = Math.sin(twist);
+    pPos[i * 3] = x * cosT - z * sinT;
+    pPos[i * 3 + 1] = y;
+    pPos[i * 3 + 2] = x * sinT + z * cosT;
+
+    pSizes[i] = 1.2 + Math.random() * 2.5;
+    pAlphas[i] = 0.2 + Math.random() * 0.6;
+    pRingIdx[i] = ri;
+    pAngle[i] = a;
+    pSpeed[i] = 0.003 + Math.random() * 0.008;
+    pRadius[i] = r;
   }
 
-  function slot(h) { return h ? h.slice(0, 6) + "…" + h.slice(-4) : "—"; }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-    }[c]));
-  }
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  pGeo.setAttribute('aSize', new THREE.BufferAttribute(pSizes, 1));
+  pGeo.setAttribute('aAlpha', new THREE.BufferAttribute(pAlphas, 1));
 
-  const EMBEDDED = window.__RENN_SNAPSHOT__ !== undefined;
-  let data = EMBEDDED ? window.__RENN_SNAPSHOT__.policiesPayload || { policies: [] } : { policies: [] };
-  let heroState = "ARMED";
-  let evidenceData = EMBEDDED ? window.__RENN_SNAPSHOT__.evidencePayload || { transactions: [] } : { transactions: [] };
-
-  function renderEvidence() {
-    const box = $("evidence");
-    const txns = evidenceData.transactions || [];
-    const real = txns.filter((t) => t.txHash && t.sponsored);
-    const chainOf = () => "polygonscan.com/tx/";
-    const rows = real
-      .map(
-        (t) =>
-          `<div class="ev"><span class="t">${fmt(t.at)}</span><span class="ty tr">${t.sponsored ? "SPONSORED" : ""}</span>` +
-          `<span class="msg">${escapeHtml(t.message)}</span>` +
-          `<a class="mono" href="${t.txLink || "https://" + chainOf() + (t.txHash || "")}" target="_blank" rel="noreferrer">${t.txHash ? slot(t.txHash) : "—"}</a>` +
-          `${t.executionId ? `<span class="mono">${t.executionId}</span>` : ""}</div>`
-      )
-      .join("");
-    const pending = txns.some((t) => !t.txHash && !t.sponsored)
-      ? `<div class="ev-warn"><span class="ty wa">PENDING</span> recorded executions awaiting on-chain hashes</div>`
-      : "";
-    box.innerHTML = `<h3>LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE</h3>
-      <div class="ev-sub">Every transaction below is real and sponsored on Polygon mainnet, but moves <b>zero USDC</b> (empty org wallet). It proves finality-gated KeeperHub execution — it does not yet prove value settlement.</div>
-      <div class="ev-list">${rows}</div>
-      <div class="ev-pending"><span class="ty wa">NONZERO SETTLEMENT — PENDING COLLATERAL</span> requires ~1 USDC in the org wallet <span class="mono">0x9f7d…e6fc</span>; blocked until then, shown honestly.</div>
-      ${pending}`;
-  }
-
-  async function refreshEvidence() {
-    try {
-      const r = await fetch("/evidence");
-      if (!r.ok) throw new Error("no server");
-      evidenceData = await r.json();
-      renderEvidence();
-    } catch {
-      // evidence strip stays empty rather than lying
-    }
-  }
-
-  function renderChain() {
-    const box = $("chain");
-    const policies = data.policies || [];
-    const chains = new Map();
-    for (const p of policies) {
-      if (!p.chainId) continue;
-      if (!chains.has(p.chainId)) chains.set(p.chainId, []);
-      chains.get(p.chainId).push(p);
-    }
-    if (chains.size === 0) { box.innerHTML = ""; return; }
-    let html = `<h3>OBLIGATION CHAIN &mdash; SETTLEMENT PROOF IS EXECUTABLE STATE</h3>
-      <div class="chain-sub">A proven settlement becomes the authorization for the next obligation: leg #2 only executes through KeeperHub because leg #1 is independently verified PROVEN_SETTLED on chain.</div>`;
-    for (const [chainId, legs] of chains) {
-      legs.sort((a, b) => {
-        if (!a.dependsOn) return -1;
-        if (!b.dependsOn) return 1;
-        if (a.dependsOn === b.policyId) return -1;
-        if (b.dependsOn === a.policyId) return 1;
-        return 0;
-      });
-      const closed = legs.every((l) => l.state === "SETTLED");
-      legs.forEach((l, i) => {
-        const proven = (l.events || []).some((e) => e.type === "SETTLED" && e.meta && e.meta.verification);
-        html += `<div class="leg">
-          <span class="no">#${i + 1}</span>
-          <span class="oid">${escapeHtml(l.policyId)}</span>
-          <span class="st ${escapeHtml(l.state)}">${escapeHtml(l.state)}</span>
-          <span class="unlock">${i > 0 ? "UNLOCKED BY " + escapeHtml(l.dependsOn) + " PROVEN_SETTLED" : "CHAIN ROOT"}</span>
-          <span>${escapeHtml(l.faceValueUsdc || l.positionValueUsdc || "0")} USDC</span>
-          ${proven ? '<span class="unlock">INDEPENDENT VERIFY: PROVEN</span>' : ""}
-        </div>`;
-      });
-      html += `<div class="closed">CHAIN ${closed ? "CLOSED" : "OPEN"} &mdash; ${escapeHtml(chainId)} &middot; ${legs.length} obligations${closed ? " &middot; PROVEN CHAIN COMPLETE" : ""}</div>`;
-    }
-    box.innerHTML = html;
-  }
-
-  async function refresh() {
-    try {
-      const r = await fetch("/policies");
-      if (!r.ok) throw new Error("no server");
-      data = await r.json();
-      $("s-poly").className = "dot ok";
-      $("s-gamma").className = "dot ok";
-    } catch {
-      if (!EMBEDDED) {
-        $("s-poly").className = "dot err";
-        $("s-gamma").className = "dot err";
+  const pMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+    },
+    vertexShader: `
+      uniform float uTime;
+      uniform float uPixelRatio;
+      attribute float aSize;
+      attribute float aAlpha;
+      varying float vAlpha;
+      void main() {
+        vAlpha = aAlpha;
+        vec3 pos = position;
+        vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+        gl_PointSize = aSize * uPixelRatio * (200.0 / -mv.z);
+        gl_Position = projectionMatrix * mv;
       }
+    `,
+    fragmentShader: `
+      varying float vAlpha;
+      void main() {
+        float d = length(gl_PointCoord - 0.5) * 2.0;
+        if (d > 1.0) discard;
+        float glow = exp(-d * 3.0);
+        float core = exp(-d * 8.0);
+        vec3 col = mix(vec3(0.55, 0.55, 0.58), vec3(0.85, 0.85, 0.87), core);
+        gl_FragColor = vec4(col, vAlpha * (0.3 + glow * 0.5 + core * 0.4));
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+
+  const particles = new THREE.Points(pGeo, pMat);
+  scene.add(particles);
+
+  // --- CENTRAL CORE (pulsing orb) ---
+  const coreGeo = new THREE.IcosahedronGeometry(0.25, 3);
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: 0xc8ff00,
+    transparent: true,
+    opacity: 0.08,
+    wireframe: true,
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  scene.add(core);
+
+  // Inner glow
+  const glowGeo = new THREE.IcosahedronGeometry(0.18, 2);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xc8ff00,
+    transparent: true,
+    opacity: 0.15,
+  });
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  scene.add(glow);
+
+  // --- FLOATING SETTLEMENT MARKERS (small dots at ring intersections) ---
+  const markerCount = 12;
+  const markerGeo = new THREE.SphereGeometry(0.03, 8, 8);
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0xc8ff00, transparent: true, opacity: 0.6 });
+  const markers = [];
+  for (let i = 0; i < markerCount; i++) {
+    const m = new THREE.Mesh(markerGeo, markerMat.clone());
+    const ri = i % 6;
+    const r = 0.8 + ri * 0.28;
+    const a = (i / markerCount) * Math.PI * 2;
+    m.position.set(
+      r * Math.cos(a),
+      r * Math.sin(a) * Math.cos(Math.PI * 0.45),
+      r * Math.sin(a) * Math.sin(Math.PI * 0.45)
+    );
+    scene.add(m);
+    markers.push({ mesh: m, ringIdx: ri, angle: a, radius: r });
+  }
+
+  // --- MOUSE ---
+  let mx = 0, my = 0;
+  document.addEventListener('mousemove', (e) => {
+    mx = (e.clientX / window.innerWidth - 0.5) * 0.4;
+    my = (e.clientY / window.innerHeight - 0.5) * 0.3;
+  });
+
+  // --- ANIMATE ---
+  function animate() {
+    requestAnimationFrame(animate);
+    const t = performance.now() * 0.001;
+
+    // Rotate ring system
+    ringGroup.rotation.y = t * 0.06 + mx * 0.5;
+    ringGroup.rotation.x = Math.sin(t * 0.08) * 0.1 + my * 0.3;
+
+    // Animate particles along rings
+    const pos = pGeo.attributes.position.array;
+    for (let i = 0; i < pCount; i++) {
+      const ri = pRingIdx[i];
+      pAngle[i] += pSpeed[i];
+      const a = pAngle[i];
+      const r = pRadius[i];
+      const tilt = Math.PI * 0.45 + ri * 0.08;
+      const twist = ri * 0.12;
+
+      const x = r * Math.cos(a);
+      const y = r * Math.sin(a) * Math.cos(tilt);
+      const z = r * Math.sin(a) * Math.sin(tilt);
+
+      const cosT = Math.cos(twist), sinT = Math.sin(twist);
+      pos[i * 3] = x * cosT - z * sinT;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = x * sinT + z * cosT;
     }
-    heroState = data.policies[0]?.state ?? "ARMED";
-    renderPipeline();
-    renderChain();
-    frames();
-    $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ");
+    pGeo.attributes.position.needsUpdate = true;
+
+    // Pulse core
+    core.rotation.x = t * 0.3;
+    core.rotation.y = t * 0.2;
+    const s = 1 + Math.sin(t * 1.5) * 0.1;
+    core.scale.set(s, s, s);
+    glow.scale.set(s * 1.2, s * 1.2, s * 1.2);
+
+    // Pulse markers
+    markers.forEach((m, i) => {
+      const pulse = Math.sin(t * 2 + i * 0.8) * 0.5 + 0.5;
+      m.mesh.material.opacity = 0.2 + pulse * 0.5;
+      const ms = 0.8 + pulse * 0.4;
+      m.mesh.scale.set(ms, ms, ms);
+    });
+
+    pMat.uniforms.uTime.value = t;
+    renderer.render(scene, camera);
   }
-  renderEvidence();
+  animate();
+})();
+
+// --- DATA / RENDERING ---
+const $ = (id) => document.getElementById(id);
+const fmt = (h) => h ? h.slice(0, 10) + " " + h.slice(11, 19) : "";
+const STAGES = ["ARMED", "LOCKED", "WAITING_FINALITY", "RESOLVED", "EXECUTING", "VERIFYING", "SETTLED"];
+function slot(h) { return h ? h.slice(0, 6) + "…" + h.slice(-4) : "—"; }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+function linkify(msg) {
+  return msg.replace(/(0x[a-fA-F0-9]{64})/g, '<a href="https://polygonscan.com/tx/$1" target="_blank" rel="noreferrer">$1</a>');
+}
+
+const EMBEDDED = window.__RENN_SNAPSHOT__ !== undefined;
+let data = EMBEDDED ? window.__RENN_SNAPSHOT__.policiesPayload || { policies: [] } : { policies: [] };
+let heroState = "ARMED";
+let evidenceData = EMBEDDED ? window.__RENN_SNAPSHOT__.evidencePayload || { transactions: [] } : { transactions: [] };
+
+function renderEvidence() {
+  const list = $("ev-list");
+  if (!list) return;
+  const txns = evidenceData.transactions || [];
+  const real = txns.filter((t) => t.txHash && t.sponsored);
+  list.innerHTML = real.map((t) =>
+    `<div class="ev">
+      <span class="t">${fmt(t.at)}</span>
+      <span class="tag">SPONSORED</span>
+      <span class="msg">${escapeHtml(t.message)}</span>
+      <a href="${t.txLink || "https://polygonscan.com/tx/" + (t.txHash || "")}" target="_blank" rel="noreferrer">${t.txHash ? slot(t.txHash) : "—"}</a>
+    </div>`
+  ).join("");
+}
+
+function renderChain() {
+  const box = $("chain-box");
+  const policies = data.policies || [];
+  const chains = new Map();
+  for (const p of policies) {
+    if (!p.chainId) continue;
+    if (!chains.has(p.chainId)) chains.set(p.chainId, []);
+    chains.get(p.chainId).push(p);
+  }
+  if (chains.size === 0) { box.innerHTML = ""; return; }
+  let html = `<div class="chain-section fade-up">
+    <div class="section-label">Obligation Chain</div>
+    <h3>Settlement proof<br>is <em>executable state.</em></h3>
+    <p class="chain-sub">
+      A proven settlement becomes the authorization for the next obligation.
+      Leg #2 only executes through KeeperHub because leg #1 is independently
+      verified PROVEN_SETTLED on chain.
+    </p>`;
+  for (const [chainId, legs] of chains) {
+    legs.sort((a, b) => {
+      if (!a.dependsOn) return -1;
+      if (!b.dependsOn) return 1;
+      if (a.dependsOn === b.policyId) return -1;
+      if (b.dependsOn === a.policyId) return 1;
+      return 0;
+    });
+    const closed = legs.every((l) => l.state === "SETTLED");
+    legs.forEach((l, i) => {
+      const proven = (l.events || []).some((e) => e.type === "SETTLED" && e.meta && e.meta.verification);
+      html += `<div class="chain-leg">
+        <span class="num">#${i + 1}</span>
+        <span class="id">${escapeHtml(l.policyId)}</span>
+        <span class="st ${escapeHtml(l.state)}">${escapeHtml(l.state)}</span>
+        <span class="unlock">${i > 0 ? "UNLOCKED BY " + escapeHtml(l.dependsOn) : "CHAIN ROOT"}</span>
+        <span style="color:var(--muted)">${escapeHtml(l.faceValueUsdc || l.positionValueUsdc || "0")} USDC</span>
+        ${proven ? '<span class="unlock">VERIFY: PROVEN</span>' : ""}
+      </div>`;
+    });
+    html += `<div class="chain-closed">CHAIN ${closed ? "CLOSED" : "OPEN"} — ${escapeHtml(chainId)} · ${legs.length} obligations${closed ? " · PROVEN CHAIN COMPLETE" : ""}</div>`;
+  }
+  html += `</div>`;
+  box.innerHTML = html;
+}
+
+function frames() {
+  const grid = $("cards");
+  grid.innerHTML = "";
+  if (!data.policies?.length) {
+    grid.innerHTML = '<div class="empty">No policies armed.</div>';
+    return;
+  }
+  for (const p of data.policies) {
+    const card = document.createElement("div");
+    card.className = "card fade-up";
+    card.innerHTML = `
+      <div class="card-head">
+        <div>
+          <div class="q">${escapeHtml(p.question || p.policyId)}</div>
+          <div class="meta">${p.policyId} · ${p.faceValueUsdc || p.positionValueUsdc || "—"} USDC · condition ${slot(p.conditionId)}${p.state === "WAITING_FINALITY" ? " · SETTLEMENT BLOCKED" : ""}</div>
+        </div>
+        <span class="badge ${p.state}">${p.state}</span>
+      </div>
+      <div class="card-body">
+        <div class="kv">
+          <span class="k">Obligation</span><span class="v">${p.faceValueUsdc || p.positionValueUsdc || "—"} USDC</span>
+          <span class="k">Beneficiary</span><span class="v">${slot(p.treasury)}${p.treasuryLabel ? " " + escapeHtml(p.treasuryLabel) : ""}</span>
+          <span class="k">Finality</span><span class="v">${p.finality || "on-chain-ctf"}${p.state === "WAITING_FINALITY" ? ' <b style="color:#f87171">(BLOCKED)</b>' : ""}</span>
+          <span class="k">Hash</span><span class="v">${p.obligationHash ? slot(p.obligationHash) : "—"}</span>
+          <span class="k">Resolution</span><span class="v ${p.resolution.resolved ? "good" : ""}">${p.resolution.text}${p.resolution.denominator !== "?" ? " (denom " + p.resolution.denominator + ")" : ""}</span>
+          <span class="k">Execution</span><span class="v" style="color:var(--muted)">KeeperHub workflow frozen</span>
+        </div>
+        <div class="log">${p.events.map((e) => `
+          <div class="row">
+            <span class="t">${fmt(e.at)}</span>
+            <span class="ty">${e.type}</span>
+            <span class="msg">${linkify(escapeHtml(e.message || ""))}${(e.txHashes || []).map((th) => ` <a href="https://polygonscan.com/tx/${th}" target="_blank" rel="noreferrer">tx ${slot(th)}</a>`).join("")}</span>
+          </div>`).join("")}</div>
+      </div>`;
+    grid.appendChild(card);
+  }
+}
+
+function renderPipeline() {
+  let which = -1;
+  for (let i = 0; i < STAGES.length; i++) {
+    if (heroState === STAGES[i]) which = i;
+  }
+  for (let i = 1; i <= 7; i++) {
+    const st = $("st-" + i);
+    if (!st) continue;
+    st.classList.remove("active", "done");
+    if (i < which) st.classList.add("done");
+    if (i === which) st.classList.add("active");
+  }
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/policies");
+    if (!r.ok) throw new Error("no server");
+    data = await r.json();
+    $("s-poly").className = "ndot ok";
+    $("s-kh").className = "ndot ok";
+  } catch {
+    if (!EMBEDDED) {
+      $("s-poly").className = "ndot err";
+      $("s-kh").className = "ndot err";
+    }
+  }
+  heroState = data.policies[0]?.state ?? "ARMED";
+  renderPipeline();
   renderChain();
-  refresh();
-  refreshEvidence();
-  if (!EMBEDDED) {
-    setInterval(refresh, 15000);
-    setInterval(refreshEvidence, 15000);
-  }
+  frames();
+  renderEvidence();
+  if ($("clock")) $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
+// Fade-in observer
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add("visible"); });
+}, { threshold: 0.08 });
+function observeAll() { document.querySelectorAll('.fade-up:not(.visible)').forEach((el) => obs.observe(el)); }
+
+refresh();
+observeAll();
+if (!EMBEDDED) {
+  setInterval(() => { refresh(); observeAll(); }, 15000);
+}
 </script>
 </body>
 </html>
