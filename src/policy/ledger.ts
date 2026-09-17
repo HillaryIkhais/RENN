@@ -50,6 +50,7 @@ export function reload(): Policy[] {
       WAITING_FINALITY: "WAITING_FINALITY",
       RESOLVED: "RESOLVED",
       EXECUTING: "EXECUTING",
+      VERIFYING: "VERIFYING",
       SETTLED: "SETTLED",
       FAILED: "FAILED",
       EXPIRED: "EXPIRED",

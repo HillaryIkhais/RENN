@@ -50,17 +50,22 @@ execution. Polymarket is the first live source of truth (any resolvable
 condition is the long-run target). Renn's state machine then enforces the
 two-step reality of resolution:
 
-`ARMED → LOCKED → WAITING_FINALITY → RESOLVED → EXECUTING → SETTLED`
+`ARMED → LOCKED → WAITING_FINALITY → RESOLVED → EXECUTING → VERIFYING → SETTLED`
 
 - **LOCKED** — envelope frozen; nobody can later change who, what, or when.
 - **WAITING_FINALITY** — outcome proposed but provisional: **SETTLEMENT
   BLOCKED**. No irreversible transaction fires.
 - **RESOLVED** — on-chain finality: `payoutDenominator(conditionId) > 0`.
-- **EXECUTING → SETTLED** — KeeperHub runs the frozen workflow; obligation
-  discharged; every execution id and tx is in the append-only ledger.
+- **EXECUTING → VERIFYING → SETTLED** — KeeperHub runs the frozen workflow, and
+  only then Renn **independently re-reads the chain** (finality, envelope
+  integrity, confirmed transaction, beneficiary possession) before the
+  obligation closes as **PROVEN SETTLED**. A failed or disputed execution keeps
+  the same frozen obligation alive for retry (`FAILED`, retryable); a settled
+  obligation is exactly-once and refuses duplicate payment (`ALREADY SETTLED`).
 
 The invariant that makes this an obligation and not a script:
-**LOCKED OBLIGATION ≠ EDITABLE AGENT INTENT.**
+**LOCKED OBLIGATION ≠ EDITABLE AGENT INTENT** and **SETTLED ≠ "KeeperHub said
+it's done"** (Renn verifies the postcondition itself).
 
 ## Why KeeperHub
 
@@ -94,8 +99,13 @@ the precommitment contract.
        │                ▼                             ▼            ▼
   market truth     FINALITY GATE:               simulate -> broadcast   status poll
                    proposed  -> WAITING_FINALITY  (success && !revert)   (completed)
-                   denom > 0 -> RESOLVED
+                   denom > 0 -> RESOLVED                                   │
        └────────────────┴──────────── RENN obligation ledger (append-only JSONL)
+                                        │
+                                        ▼
+                              POSTCONDITION VERIFY (src/policy/verify.ts)
+                              finality + integrity + execution + possession
+                              PROVEN -> SETTLED / FAILED (retry, same obligation)
 ```
 
 | Layer | Component | Location |
@@ -104,8 +114,9 @@ the precommitment contract.
 | Obligation | `obligationEnvelope()` keccak-hash + promise-of-payment, immutable after lock | `src/policy/obligation.ts` |
 | Redemption | CTF / NegRiskAdapter redemption, ABI-verified against live CTF | `src/polymarket/redemption.ts` |
 | Execution | KeeperHub workflow composer + safe direct-execution client | `src/keeperhub/` |
-| Policy | Append-only state machine (ARMED → … → SETTLED) | `src/policy/` |
-| Surface | CLI (`arm`, `status`, `watch`, `execute`, `prototype`, `demo:*`, `sanity`) + live console | `src/index.ts`, `dashboard/` |
+| Policy | Append-only state machine (ARMED → … → SETTLED, incl. VERIFYING/FAILED) | `src/policy/` |
+| Postcondition | Independent on-chain verification (`verifySettlement`) — PROVEN/BLOCKED/DISPUTED | `src/policy/verify.ts` |
+| Surface | CLI (`arm`, `status`, `watch`, `execute`, `verify`, `prototype`, `demo:*`, `sanity`) + live console | `src/index.ts`, `dashboard/` |
 | Demo | Deterministic, real-mainnet CTF condition under Renn's control | `src/polymarket/demo-engine.ts` |
 
 ## Exact live sequences

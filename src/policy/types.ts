@@ -4,6 +4,7 @@ export type PolicyState =
   | "WAITING_FINALITY"
   | "RESOLVED"
   | "EXECUTING"
+  | "VERIFYING"
   | "SETTLED"
   | "FAILED"
   | "EXPIRED";
@@ -54,6 +55,7 @@ export type PolicyEventType =
   | "WAITING_FINALITY"
   | "RESOLVED"
   | "EXECUTING"
+  | "VERIFYING"
   | "SETTLED"
   | "FAILED"
   | "EXPIRED"

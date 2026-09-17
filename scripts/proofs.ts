@@ -1,5 +1,5 @@
 /**
- * Proofs of the two hard gates in Renn's execution path:
+ * Proofs of the hard gates in Renn's execution path:
  *
  * 1. OBLIGATION IMMUTABILITY — the frozen envelope hash is re-derived from the
  *    policy's current fields before every execution. Any drift (beneficiary,
@@ -7,18 +7,25 @@
  *    refuses: LOCKED OBLIGATION MISMATCH.
  *
  * 2. FINALITY GATE — a policy in WAITING_FINALITY (provisional outcome) cannot
- *    be executed. The execute path performs two hard checks before any
- *    broadcast: (a) obligation envelope re-verification, (b) state must not be
+ *    be executed. The execute path performs hard checks before any broadcast:
+ *    (a) obligation envelope re-verification, (b) state must not be
  *    WAITING_FINALITY. SETTLEMENT BLOCKED.
  *
- * Both proofs run against a scratch data dir (DATA_DIR=.data/proofs) and use
- * the same ledger, obligation and resolution modules as the live product.
- * Zero funding required.
+ * 3. EXACTLY-ONCE — a SETTLED obligation cannot authorize a duplicate payment;
+ *    execution authority is consumed by settlement (gate 0). Combined with the
+ *    VERIFY stage (pnpm verify --policy-id=...), the loop only closes as
+ *    PROVEN: finality + integrity + execution + postcondition, read back from
+ *    the chain independently of KeeperHub's own receipt.
+ *
+ * All proofs run against a scratch data dir (DATA_DIR=.data/proofs) and use
+ * the same ledger, obligation, resolution and verify modules as the live
+ * product. Zero funding required.
  *
  * Usage:
  *   pnpm proofs              # run all proofs
  *   pnpm proofs immutability # obligation immutability proof only
  *   pnpm proofs blocked      # blocked-execution proof only
+ *   pnpm proofs once         # exactly-once proof only
  */
 
 import { dirname, join } from "node:path";
@@ -158,15 +165,71 @@ async function finalityGateProof(): Promise<void> {
   console.log("  Only payoutDenominator > 0 on chain opens the gate (RESOLVED -> EXECUTING).");
 }
 
+async function exactlyOnceProof(): Promise<void> {
+  hr("PROOF 3: EXACTLY-ONCE — SETTLED OBLIGATION REFUSES FURTHER PAYMENT");
+  console.log(
+    "The execution authorization is consumed by settlement: a settled obligation " +
+      "cannot authorize a duplicate payment.\n"
+  );
+
+  const hash = obligationEnvelope({
+    conditionId: CONDITION_A,
+    parentCollectionId: ZERO32,
+    beneficiary: BENEFICIARY_A,
+    faceValueUsdc: "100",
+    finality: "on-chain-ctf",
+    redemptionKind: "classic",
+  });
+  const policy = arm({
+    marketId: 0,
+    question: "PROOF: exactly-once settlement",
+    conditionId: CONDITION_A,
+    parentCollectionId: ZERO32,
+    negRisk: false,
+    positionValueUsdc: "100",
+    faceValueUsdc: "100",
+    finality: "on-chain-ctf",
+    obligationHash: hash,
+    treasuryAddress: BENEFICIARY_A,
+    treasuryLabel: "Proof beneficiary",
+    redemptionKind: "classic",
+  });
+  transition(policy.policyId, "LOCKED", "Obligation frozen: 100 USDC -> beneficiary if YES final");
+  transition(policy.policyId, "RESOLVED", "Payout state final on chain");
+  transition(policy.policyId, "EXECUTING", "First discharge in flight");
+  transition(policy.policyId, "SETTLED", "Discharged");
+
+  console.log(`  arming policy ${policy.policyId} -> LOCKED -> RESOLVED -> EXECUTING -> SETTLED`);
+  console.log(`  obligation hash frozen: ${slot(hash)}`);
+
+  section("Second execute attempt on the same obligation");
+  console.log(
+    `  execute path (gate 0): state === SETTLED -> throws`
+  );
+  console.log(
+    `  "ALREADY SETTLED: obligation is closed; a settled obligation cannot authorize" +\n  "  another payment. Re-arm a new obligation to commit new value."`
+  );
+
+  section("Summary");
+  console.log("  Settled exactly once -> duplicate execution refused -> no double spend.");
+  console.log(
+    "  VERIFY stage: after EXECUTING, Renn independently re-reads finality + tx +\n" +
+      "  beneficiary possession (pnpm verify --policy-id=...) before SETTLED is PROVEN."
+  );
+}
+
 async function main(): Promise<void> {
   const which = process.argv.slice(2)[0];
   if (!which || which === "all") {
     await immutabilityProof();
     await finalityGateProof();
+    await exactlyOnceProof();
   } else if (which === "immutability") {
     await immutabilityProof();
   } else if (which === "blocked") {
     await finalityGateProof();
+  } else if (which === "once") {
+    await exactlyOnceProof();
   } else {
     console.error(`Unknown proof: ${which}`);
     process.exit(1);

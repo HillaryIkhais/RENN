@@ -31,6 +31,7 @@ import {
 } from "./policy/ledger.js";
 import type { Policy, RedemptionKind } from "./policy/types.js";
 import { obligationEnvelope } from "./policy/obligation.js";
+import { verifySettlement } from "./policy/verify.js";
 import {
   discoverWallet,
   hasKeeperHubKey,
@@ -397,6 +398,22 @@ async function executeWorkflow(policyId: string): Promise<void> {
   if (!policy) throw new Error(`No policy ${policyId}`);
   if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
 
+  // Hard gate 0: exactly-once. An obligation that is already SETTLED or past
+  // finality cannot be re-executed into a fresh payment; the authorization for
+  // this obligation has already been fully consumed.
+  if (policy.state === "SETTLED") {
+    throw new Error(
+      "ALREADY SETTLED: obligation is closed; a settled obligation cannot authorize " +
+        "another payment. Re-arm a new obligation to commit new value."
+    );
+  }
+  if (policy.state === "EXPIRED" || policy.state === "FAILED") {
+    // A failed execution keeps the SAME obligation alive (same frozen hash,
+    // same idempotency boundary) so retry is permitted — but a retry can only
+    // discharge this obligation, never create a different payout.
+    console.log(`Obligation state ${policy.state}: retrying the same frozen obligation.`);
+  }
+
   // Hard gate 1: obligation immutability. Recompute the frozen envelope from
   // the current policy record; any drift means the intent was edited, and the
   // commitment is void rather than reinterpreted.
@@ -453,8 +470,15 @@ async function executeWorkflow(policyId: string): Promise<void> {
   );
 
   if (txResult.status !== "completed") {
-    throw new Error(
+    transition(
+      policy.policyId,
+      "FAILED",
       `KeeperHub execution ${txResult.executionId} ended in ${txResult.status}: ${txResult.error ?? "see KeeperHub"}`,
+      { executionId: txResult.executionId, retryable: true }
+    );
+    throw new Error(
+      `KeeperHub execution ${txResult.executionId} ended in ${txResult.status}: ${txResult.error ?? "see KeeperHub"}. ` +
+        `The obligation is still alive (same frozen hash); retry with pnpm execute --policy-id=${policy.policyId}.`
     );
   }
 
@@ -467,12 +491,46 @@ async function executeWorkflow(policyId: string): Promise<void> {
     sponsored: txResult.sponsored,
     result: txResult.result,
   });
-  transition(policy.policyId, "SETTLED", "KeeperHub redemption + routing executed", {
+
+  // Hard gate 3 (VERIFY): the obligation is not closed because KeeperHub says
+  // so or because a tx exists — it is closed only after independent on-chain
+  // postcondition verification. EXECUTING -> VERIFYING -> SETTLED (proven) or
+  // FAILED (disputed); a disputed obligation stays alive for retry.
+  transition(policy.policyId, "VERIFYING", "Independent on-chain postcondition verification", {
     executionId: txResult.executionId,
     transactionLink: link,
     sponsored: txResult.sponsored,
   });
-  console.log(`\nSETTLED. Ledger: pnpm status`);
+  const verification = await verifySettlement(policy.policyId);
+
+  if (verification.verdict !== "PROVEN") {
+    transition(
+      policy.policyId,
+      "FAILED",
+      `Settlement not proven on chain: ${verification.checks
+        .filter((c) => !c.ok)
+        .map((c) => `${c.name}: ${c.detail}`)
+        .join("; ")}`,
+      { verification: verification.verdict, retryable: true }
+    );
+    console.log(`\nVERIFY FAILED (${verification.verdict}); obligation stays alive for retry.`);
+    for (const c of verification.checks) {
+      console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
+    }
+    return;
+  }
+
+  transition(policy.policyId, "SETTLED", "KeeperHub redemption + independent postcondition verified", {
+    executionId: txResult.executionId,
+    transactionLink: link,
+    sponsored: txResult.sponsored,
+    verification,
+  });
+  console.log(`\nSETTLED after independent on-chain verification.`);
+  for (const c of verification.checks) {
+    console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
+  }
+  console.log(`Ledger: pnpm status | verify: pnpm verify --policy-id=${policy.policyId}`);
 }
 
 function requireKeeperHubKeyMessage(): string {
@@ -622,6 +680,20 @@ async function main(): Promise<void> {
       await executeWorkflow(policyId);
       break;
     }
+    case "verify": {
+      const policyId = values["policy-id"];
+      if (!policyId) throw new Error("Specify --policy-id");
+      const verification = await verifySettlement(policyId);
+      if (verification.verdict === "PROVEN") {
+        console.log(`\nOBLIGATION PROVEN SETTLED — ${policyId}`);
+      } else {
+        console.log(`\nOBLIGATION ${verification.verdict} — ${policyId}`);
+      }
+      for (const c of verification.checks) {
+        console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
+      }
+      break;
+    }
     default:
       printHelp();
   }
@@ -638,6 +710,8 @@ Commands:
   status                   show the policy ledger + on-chain resolution per policy
   watch [--interval-ms]    poll until resolution, then prompt to execute
   execute --policy-id=<id> trigger the staged KeeperHub workflow
+  verify --policy-id=<id>  independently verify settlement on chain: finality -> integrity ->
+                           execution -> postcondition; prints PROVEN/BLOCKED/DISPUTED
   demo-bootstrap           create a deterministic CTF condition + mint YES shares
   demo-resolve             report the payout (on-chain), transition to RESOLVED
   demo-distribute          redeem + route to treasury, transition to SETTLED

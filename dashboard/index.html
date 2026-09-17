@@ -54,6 +54,11 @@
   .stage.done { border-color: rgba(52,211,153,0.5); }
   .arrow { color: var(--muted); font-family: var(--mono); }
 
+  .boundary { margin-top: 20px; display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .b-cell { border: 1px solid var(--panel-border); background: var(--panel); border-radius: 10px; padding: 10px 16px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .b-cell:nth-child(3) { border-color: rgba(34,211,238,0.4); color: var(--accent2); }
+  .b-arrow { color: var(--muted); font-family: var(--mono); }
+
   .card { margin-top: 26px; border: 1px solid var(--panel-border); background: var(--panel); border-radius: 14px; overflow: hidden; }
   .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
   .card-head .q { font-size: 15px; font-weight: 600; line-height: 1.35; }
@@ -64,6 +69,7 @@
   .badge.WAITING_FINALITY { color: var(--bad); border-color: rgba(248,113,113,0.55); animation: pulse 1.6s infinite; }
   .badge.RESOLVED { color: var(--accent); border-color: rgba(99,102,241,0.5); }
   .badge.EXECUTING { color: var(--warn); border-color: rgba(251,191,36,0.5); }
+  .badge.VERIFYING { color: var(--accent2); border-color: rgba(34,211,238,0.6); animation: pulse 1.6s infinite; }
   .badge.SETTLED { color: var(--good); border-color: rgba(52,211,153,0.5); }
   .badge.FAILED, .badge.EXPIRED { color: var(--bad); border-color: rgba(248,113,113,0.5); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -86,7 +92,10 @@
   .foot { margin-top: 40px; color: var(--muted); font-size: 12px; font-family: var(--mono); line-height: 1.7; }
 
   #evidence { margin-top: 34px; border: 1px solid rgba(52,211,153,0.35); background: linear-gradient(135deg, rgba(52,211,153,0.07), rgba(99,102,241,0.05)); border-radius: 14px; padding: 16px 20px; }
-  #evidence h3 { margin: 0 0 12px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--good); }
+  #evidence h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--good); }
+  .ev-sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+  .ev-pending { margin-top: 12px; border-top: 1px dashed rgba(251,191,36,0.35); padding-top: 10px; font-size: 12.5px; color: var(--warn); }
+  .ev-pending .mono { color: var(--accent2); }
   .ev-list { display: flex; flex-direction: column; gap: 8px; }
   .ev { display: flex; gap: 12px; align-items: baseline; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
   .ev .t { color: var(--muted); white-space: nowrap; }
@@ -133,23 +142,34 @@
     <span class="arrow">&#8594;</span>
     <div class="stage" id="st-5"><div class="idx">05</div><div class="nm">EXECUTING</div><div class="desc">keeper settles</div></div>
     <span class="arrow">&#8594;</span>
-    <div class="stage" id="st-6"><div class="idx">06</div><div class="nm">SETTLED</div><div class="desc">obligation discharged</div></div>
+    <div class="stage" id="st-6"><div class="idx">06</div><div class="nm">VERIFYING</div><div class="desc">independent check</div></div>
+    <span class="arrow">&#8594;</span>
+    <div class="stage" id="st-7"><div class="idx">07</div><div class="nm">SETTLED</div><div class="desc">obligation discharged</div></div>
+  </div>
+
+  <div class="boundary">
+    <div class="b-cell">AGENT PROPOSES</div>
+    <span class="b-arrow">&#8595;</span>
+    <div class="b-cell">RENN DETERMINISTIC GATE</div>
+    <span class="b-arrow">&#8595;</span>
+    <div class="b-cell">KEEPERHUB EXECUTES</div>
   </div>
 
   <section id="evidence"></section>
   <section id="cards"></section>
 
   <div class="foot">
-    RENN v0.1 — mainnet proof build &middot; LIVE MAINNET PROOF below (real sponsored KeeperHub execution hashes)<br>
-    PENDING LIVE VALUE LEG: nonzero USDC settlement requires ~1 USDC collateral in the org wallet (sponsored gas).<br>
-    Obligation: frozen envelope -> on-chain CTF finality gate -> KeeperHub deterministic execution -> discharge &middot; Safe loop: simulate, one broadcast, poll, verify
+    RENN v0.1 — mainnet proof build<br>
+    LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE &middot; real sponsored KeeperHub execution hashes (empty org wallet)<br>
+    NONZERO SETTLEMENT — PENDING COLLATERAL &middot; requires ~1 USDC in the org wallet; not claimed as completed<br>
+    Obligation: frozen envelope -> on-chain CTF finality gate -> KeeperHub deterministic execution -> independent postcondition verify -> discharge
   </div>
 </div>
 
 <script>
   const $ = (id) => document.getElementById(id);
   const fmt = (h) => h ? h.slice(0, 10) + " " + h.slice(11, 19) : "";
-  const STAGES = ["ARMED", "LOCKED", "WAITING_FINALITY", "RESOLVED", "EXECUTING", "SETTLED"];
+  const STAGES = ["ARMED", "LOCKED", "WAITING_FINALITY", "RESOLVED", "EXECUTING", "VERIFYING", "SETTLED"];
 
   function linkify(msg) {
     return msg.replace(/(0x[a-fA-F0-9]{64})/g, '<a href="https://polygonscan.com/tx/$1" target="_blank" rel="noreferrer">$1</a>');
@@ -198,10 +218,10 @@
     for (let i = 0; i < STAGES.length; i++) {
       if (heroState === STAGES[i]) which = i;
     }
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= 7; i++) {
       const st = $("st-" + i);
       st.classList.remove("active", "done");
-      if (i <= which) st.classList.add("done");
+      if (i < which) st.classList.add("done");
       if (i === which) st.classList.add("active");
     }
   }
@@ -234,8 +254,10 @@
     const pending = txns.some((t) => !t.txHash && !t.sponsored)
       ? `<div class="ev-warn"><span class="ty wa">PENDING</span> recorded executions awaiting on-chain hashes</div>`
       : "";
-    box.innerHTML = `<h3>LIVE MAINNET PROOF — real sponsored KeeperHub transactions</h3>
-      ${real.length ? `<div class="ev-list">${rows}</div>` : `<div class="ev-warn">No recorded sponsored transactions yet.</div>`}
+    box.innerHTML = `<h3>LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE</h3>
+      <div class="ev-sub">Every transaction below is real and sponsored on Polygon mainnet, but moves <b>zero USDC</b> (empty org wallet). It proves finality-gated KeeperHub execution — it does not yet prove value settlement.</div>
+      <div class="ev-list">${rows}</div>
+      <div class="ev-pending"><span class="ty wa">NONZERO SETTLEMENT — PENDING COLLATERAL</span> requires ~1 USDC in the org wallet <span class="mono">0x9f7d…e6fc</span>; blocked until then, shown honestly.</div>
       ${pending}`;
   }
 

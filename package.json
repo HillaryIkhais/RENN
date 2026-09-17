@@ -15,6 +15,8 @@
     "sanity": "tsx src/index.ts sanity",
     "prototype": "tsx src/index.ts prototype",
     "zero-value": "tsx src/index.ts zero-value",
+    "execute": "tsx src/index.ts execute",
+    "verify": "tsx src/index.ts verify",
     "proofs": "tsx scripts/proofs.ts",
     "watch": "tsx src/index.ts watch",
     "dashboard": "tsx scripts/serve-dashboard.ts",

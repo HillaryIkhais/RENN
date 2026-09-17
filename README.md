@@ -1,22 +1,47 @@
 # Renn
 
-**Prediction is probabilistic. Settlement isn't.**
+**Renn — deterministic settlement gates for agentic onchain execution.**
 
-**Renn turns future outcomes into enforceable obligations.**
+Prediction is probabilistic. **Settlement isn't.**
 
-You commit a payment to an uncertain outcome today. Renn freezes the obligation
-— beneficiary, amount, trigger, and the exact KeeperHub settlement workflow —
-before the outcome is known. When the world resolves, KeeperHub settles it only
-after the outcome is *final*: a provisional proposal can never trigger an
-irreversible payment. Nothing is inferred at execution time.
+Renn turns future outcomes into enforceable obligations: when an agent's
+decision depends on an external onchain outcome, Renn prevents that decision
+from becoming an irreversible payment until the outcome is **final** and the
+authorized obligation still holds. It is finality-gated, immutable, exactly-once
+and **independently verified after settlement** — not merely transported by
+KeeperHub.
 
-The loop:
+```
+AGENT PROPOSES
+    ↓
+RENN DETERMINISTIC GATE   (finality + immutability + exactly-once)
+    ↓
+KEEPERHUB EXECUTES        (frozen workflow, sponsored gas)
+    ↓
+RENN POSTCONDITION VERIFY (chain re-read: no "KeeperHub says it's done")
+    ↓
+OBLIGATION PROVEN SETTLED
+```
 
-`ARMED → LOCKED → WAITING_FINALITY → RESOLVED → EXECUTING → SETTLED`
+**REAL POLYGON PROOF** — 3 sponsored Polygon mainnet transactions from an empty
+org wallet, executed by KeeperHub against a real, finally-resolved Polymarket
+condition (gate OPEN on-chain), all read back and PROVEN by `pnpm verify`.
 
-Part of the KeeperHub "Agent Economy" Hackathon (main track, deadline
-September 18 12:00 CEST) and the Arc Testnet chain-registration bounty
-(issue #2230, PR merged alongside).
+```
+REAL POLYGON PROOF            3 verified Polygon mainnet transactions
+KEEPERHUB EXECUTION           executionId + sponsored flag on every one
+POLYMARKET CONDITION          real resolved CTF condition (0x0c481aa6…eae0)
+GATES                         finality (BLOCKED), immutability, exactly-once
+NONZERO SETTLEMENT STATUS     PENDING ~1 USDC collateral (honest, not claimed)
+```
+
+**NONZERO SETTLEMENT — PENDING COLLATERAL.** The live proof moves zero USDC.
+Completing the value leg needs ~1 USDC in the org wallet
+`0x9f7de2b79d93adb3d3ef6501ca6d8c8c00a2e6fc` (gas sponsored). Until that lands,
+the submission claims only what is proven and marks the rest PENDING.
+
+Part of the KeeperHub "Agent Economy" Hackathon (main track) and the Arc
+Testnet chain-registration bounty (issue #2230, PR merged alongside).
 
 ## The primitive
 
@@ -65,13 +90,16 @@ remembering, reinterpretating, or approving it later:
 3. WAITING  — outcome proposed: SETTLEMENT BLOCKED until payout state is final.
 4. RESOLVED — on-chain finality: CTF payoutDenominator(conditionId) > 0.
 5. EXECUTE  — KeeperHub runs the frozen workflow: redeem + route.
-6. SETTLED  — obligation discharged; every execution id + tx is in the ledger.
+6. VERIFY   — independent on-chain re-read: finality + integrity + execution + postcondition.
+7. SETTLED  — obligation proven discharged; execution id + tx + verification in the ledger.
 ```
 
 Each stage is a tracked state in `src/policy/ledger.ts`. Transitions are only
 driven by on-chain evidence. `payoutDenominator` on the Polymarket Conditional
 Tokens contract is the only thing that moves an obligation to EXECUTING; a
-provisional proposal only ever produces `WAITING_FINALITY`.
+provisional proposal only ever produces `WAITING_FINALITY`. Execution closes as
+`SETTLED` only when `pnpm verify` proves finality, integrity, on-chain execution
+and beneficiary possession — never on KeeperHub's receipt alone.
 
 ## Architecture
 
@@ -268,16 +296,23 @@ nothing is faked.
   finality gate opens only on real on-chain resolution and the redemption path
   executes through KeeperHub at a real finally-resolved condition — without
   self-creating a condition or needing collateral.
-- **DONE — gate proofs (`pnpm proofs`, zero-funding):** two hard guarantees
+- **DONE — gate proofs (`pnpm proofs`, zero-funding):** three hard guarantees
   demonstrated live from the same modules the product uses, against a scratch
   ledger (`.data/proofs/`): (1) obligation immutability — tampering the
   beneficiary, face value, or condition after locking yields a different
   envelope hash and the execute path refuses (`LOCKED OBLIGATION MISMATCH`);
   (2) finality gate — a `WAITING_FINALITY` policy is refused before any
   broadcast (`SETTLEMENT BLOCKED … No irreversible obligation fires on a
-  preliminary result`). The FOMC market is now **finally resolved on-chain
-  (denom 1, YES wins)**, so the same gate demonstrably *opens* for the real
-  conditional payment.
+  preliminary result`); (3) exactly-once — a `SETTLED` obligation refuses
+  duplicate execution (`ALREADY SETTLED`). The FOMC market is now **finally
+  resolved on-chain (denom 1, YES wins)**, so the same gate demonstrably
+  *opens* for the real conditional payment.
+- **DONE — independent postcondition verification (`pnpm verify`):** the
+  real Layer-1 obligation is re-read from Polygon and proven settled on chain:
+  FINALITY (denom 1) + INTEGRITY (envelope hash intact) + EXECUTION (tx
+  confirmed, KeeperHub `y3729jn0stn1xmdmafg6h`) + POSTCONDITION. Settlement is
+  PROVEN, not assumed; the same VERIFY stage gates every future execution
+  (`EXECUTING → VERIFYING → SETTLED`).
 - Evidence path to a filled paper trail:
   1. `pnpm prototype --beneficiary=…` — the full six-hop lifecycle
      (approve/create/split/block/resolve/redeem/route) executed by KeeperHub.
@@ -288,9 +323,10 @@ nothing is faked.
      needs ~1 USDC to move; **marked PENDING** until the wallet is funded.
   3. The funded local demo loop (EOA 0x…74e1, ~2 USDC) as a cross-check of the
      same mechanism with no KeeperHub dependency.
-- Dashboard ships with a **LIVE MAINNET PROOF** strip (real recorded sponsored
-  hashes from the ledger) and a **pending ~1 USDC collateral** card for the
-  value-settlement leg. PENDING markers for any still-missing hashes.
+- Dashboard ships with an explicit **LIVE MAINNET EXECUTION PROOF — ZERO ASSET
+  VALUE** strip (real recorded sponsored hashes from the ledger) and a separate
+  **NONZERO SETTLEMENT — PENDING COLLATERAL** marker — the value leg is never
+  claimed as completed until collateral lands.
 
 ## Detail docs
 
