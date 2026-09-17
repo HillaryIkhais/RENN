@@ -342,8 +342,12 @@ The `kh_` org key is required for the sponsored execution path (`sanity`,
 - **Chain gate (proof as authorization).** A chained obligation fires only
   after its predecessor is independently verified `PROVEN_SETTLED` on chain
   **and** carries a valid persisted settlement proof the child references
-  (gate 1.5, `src/policy/chain.ts` + `src/policy/proof.ts`). The dependency is
-  part of the frozen envelope, so it cannot be re-pointed after locking.
+  (gate 1.5, `src/policy/chain.ts` + `src/policy/proof.ts`). The proof is a
+  required artifact: a settled-but-unproven predecessor, a tampered proof, or
+  a **deleted** proof leaves the child locked (`BLOCKED — PREDECESSOR NOT
+  PROVEN`) — it is not reconstructed from transaction history on the fly, the
+  same way `LOCKED` intent cannot be silently edited. The dependency is part of
+  the frozen envelope, so it cannot be re-pointed after locking.
 - **Exact-transfer verification, not a balance guess.** The VERIFY stage
   (`src/policy/verify.ts`) parses the distribution receipt and requires an
   exact `Transfer(USDC → beneficiary, faceValue)` event attributable to that
