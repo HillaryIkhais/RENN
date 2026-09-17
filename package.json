@@ -22,6 +22,7 @@
     "watch": "tsx src/index.ts watch",
     "dashboard": "tsx scripts/serve-dashboard.ts",
     "site:export": "tsx scripts/export-site.ts",
+    "build": "echo \"static export — dist/index.html is the committed artifact\"",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

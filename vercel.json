@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "echo 'no-build — dist/index.html is the committed static artifact'",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "headers": [
