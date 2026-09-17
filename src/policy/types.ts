@@ -39,6 +39,10 @@ export interface PolicyInput {
   workflowName?: string;
   workflow?: unknown;
   notes?: string;
+  /** obligation chain this obligation belongs to (settlement proof is executable state) */
+  chainId?: string;
+  /** preceding obligation whose PROVEN_SETTLED state is the unlock condition for this one */
+  dependsOn?: string;
 }
 
 export interface Policy extends PolicyInput {

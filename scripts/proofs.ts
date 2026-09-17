@@ -17,6 +17,11 @@
  *    PROVEN: finality + integrity + execution + postcondition, read back from
  *    the chain independently of KeeperHub's own receipt.
  *
+ * 4. OBLIGATION CHAIN — settlement proof is executable state. A chained
+ *    obligation (dependsOn) only fires after its predecessor is independently
+ *    verified PROVEN_SETTLED; the unlock condition is part of the frozen
+ *    envelope, so the chain cannot be re-pointed after locking (gate 1.5).
+ *
  * All proofs run against a scratch data dir (DATA_DIR=.data/proofs) and use
  * the same ledger, obligation, resolution and verify modules as the live
  * product. Zero funding required.
@@ -26,6 +31,7 @@
  *   pnpm proofs immutability # obligation immutability proof only
  *   pnpm proofs blocked      # blocked-execution proof only
  *   pnpm proofs once         # exactly-once proof only
+ *   pnpm proofs chain        # obligation-chain unlock proof only
  */
 
 import { dirname, join } from "node:path";
@@ -37,6 +43,7 @@ process.env.DATA_DIR = PROOF_DIR;
 const { obligationEnvelope } = await import("../src/policy/obligation.js");
 const { arm, getPolicy, transition } = await import("../src/policy/ledger.js");
 const { getResolution } = await import("../src/polymarket/resolution.js");
+const { assertChainUnlocked } = await import("../src/policy/chain.js");
 
 const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const CONDITION_A = "0xac02cbb049e46d6a3627c0fdf52fa554982a9025d45968207b362acb6ca4b830";
@@ -218,18 +225,133 @@ async function exactlyOnceProof(): Promise<void> {
   );
 }
 
+async function obligationChainProof(): Promise<void> {
+  hr("PROOF 4: OBLIGATION CHAIN — SETTLEMENT PROOF IS EXECUTABLE STATE");
+  console.log(
+    "A chained obligation only fires after its predecessor is independently\n" +
+      "verified PROVEN_SETTLED on chain. The unlock condition is part of the\n" +
+      "frozen envelope, so the chain cannot be re-pointed after locking.\n"
+  );
+
+  section("Chain binding is part of the immutable commitment");
+  const root = obligationEnvelope({
+    conditionId: CONDITION_A,
+    parentCollectionId: ZERO32,
+    beneficiary: BENEFICIARY_A,
+    faceValueUsdc: "0",
+    finality: "on-chain-ctf",
+    redemptionKind: "classic",
+  });
+  const chainedToA = obligationEnvelope({
+    conditionId: CONDITION_B,
+    parentCollectionId: ZERO32,
+    beneficiary: BENEFICIARY_A,
+    faceValueUsdc: "0",
+    finality: "on-chain-ctf",
+    redemptionKind: "classic",
+    dependsOn: "policy-predecessor-a",
+  });
+  const chainedToB = obligationEnvelope({
+    conditionId: CONDITION_B,
+    parentCollectionId: ZERO32,
+    beneficiary: BENEFICIARY_A,
+    faceValueUsdc: "0",
+    finality: "on-chain-ctf",
+    redemptionKind: "classic",
+    dependsOn: "policy-predecessor-b",
+  });
+  console.log(`  unchained  envelope ${slot(root)}`);
+  console.log(`  dependsOn A          ${slot(chainedToA)}  ${chainedToA !== root ? "DIFFERENT (GOOD)" : "SAME (BAD)"}`);
+  console.log(`  dependsOn B          ${slot(chainedToB)}  ${chainedToB !== chainedToA ? "DIFFERENT (GOOD)" : "SAME (BAD)"}`);
+  console.log("  -> re-pointing the predecessor changes the frozen hash (gate 1 void).");
+
+  section("Fail-closed: predecessor not SETTLED");
+  const armChained = (dependsOn: string): string => {
+    const p = arm({
+      marketId: 0,
+      question: "PROOF: chained obligation",
+      conditionId: CONDITION_B,
+      parentCollectionId: ZERO32,
+      negRisk: false,
+      positionValueUsdc: "0",
+      faceValueUsdc: "0",
+      finality: "on-chain-ctf",
+      obligationHash: obligationEnvelope({
+        conditionId: CONDITION_B,
+        parentCollectionId: ZERO32,
+        beneficiary: BENEFICIARY_B,
+        faceValueUsdc: "0",
+        finality: "on-chain-ctf",
+        redemptionKind: "classic",
+        dependsOn,
+      }),
+      treasuryAddress: BENEFICIARY_B,
+      treasuryLabel: "Proof chain beneficiary",
+      redemptionKind: "classic",
+      chainId: "proof-chain",
+      dependsOn,
+    });
+    transition(p.policyId, "LOCKED", "Chained obligation frozen");
+    return p.policyId;
+  };
+
+  const predecessor = arm({
+    marketId: 0,
+    question: "PROOF: chain predecessor (locked, not settled)",
+    conditionId: CONDITION_A,
+    parentCollectionId: ZERO32,
+    negRisk: false,
+    positionValueUsdc: "0",
+    faceValueUsdc: "0",
+    finality: "on-chain-ctf",
+    obligationHash: obligationEnvelope({
+      conditionId: CONDITION_A,
+      parentCollectionId: ZERO32,
+      beneficiary: BENEFICIARY_A,
+      faceValueUsdc: "0",
+      finality: "on-chain-ctf",
+      redemptionKind: "classic",
+    }),
+    treasuryAddress: BENEFICIARY_A,
+    treasuryLabel: "Proof chain root",
+    redemptionKind: "classic",
+    chainId: "proof-chain",
+  });
+  transition(predecessor.policyId, "LOCKED", "Root obligation frozen (still LOCKED)");
+
+  const dependent = armChained(predecessor.policyId);
+  console.log(`  predecessor ${predecessor.policyId} state=${getPolicy(predecessor.policyId)?.state}`);
+  console.log(`  dependent   ${dependent} dependsOn=${predecessor.policyId}`);
+  let blocked = false;
+  try {
+    await assertChainUnlocked(dependent);
+  } catch (err) {
+    blocked = true;
+    console.log(`  gate 1.5 -> ${err instanceof Error ? err.message : String(err)}`);
+  }
+  console.log(blocked ? "  BLOCKED (GOOD) — locked predecessor cannot unlock the chain" : "  FAILED — gate opened unexpectedly");
+
+  section("Summary");
+  console.log("  Settlement proof is executable state: obligation #2's unlock condition");
+  console.log("  is obligation #1's independently verified PROVEN_SETTLED state.");
+  console.log("  Live run: pnpm chain --beneficiary=<addr> --resolved=<condA> --chain-resolution=<condB>");
+}
+
 async function main(): Promise<void> {
   const which = process.argv.slice(2)[0];
   if (!which || which === "all") {
     await immutabilityProof();
     await finalityGateProof();
     await exactlyOnceProof();
+    await obligationChainProof();
   } else if (which === "immutability") {
     await immutabilityProof();
   } else if (which === "blocked") {
     await finalityGateProof();
   } else if (which === "once") {
     await exactlyOnceProof();
+  } else if (which === "chain") {
+    await obligationChainProof();
   } else {
     console.error(`Unknown proof: ${which}`);
     process.exit(1);

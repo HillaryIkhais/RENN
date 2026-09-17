@@ -77,6 +77,7 @@ export async function verifySettlement(policyId: string): Promise<SettlementVeri
       faceValueUsdc: policy.faceValueUsdc ?? policy.positionValueUsdc ?? "0",
       finality: "on-chain-ctf",
       redemptionKind: policy.redemptionKind,
+      ...(policy.dependsOn ? { dependsOn: policy.dependsOn } : {}),
     });
     envelopeIntact = recomputed === policy.obligationHash;
     checks.push({

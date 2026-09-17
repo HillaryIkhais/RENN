@@ -20,25 +20,54 @@ KEEPERHUB EXECUTES        (frozen workflow, sponsored gas)
     ↓
 RENN POSTCONDITION VERIFY (chain re-read: no "KeeperHub says it's done")
     ↓
-OBLIGATION PROVEN SETTLED
+OBLIGATION #1 PROVEN SETTLED
+    ↓
+SETTLEMENT PROOF BECOMES AUTHORIZATION   (obligation #2 is chained to #1)
+    ↓
+KEEPERHUB EXECUTES AGAIN  (obligation #2 stays locked until #1 is PROVEN)
+    ↓
+OBLIGATION #2 PROVEN SETTLED
+    ↓
+CHAIN CLOSED
 ```
 
-**REAL POLYGON PROOF** — 3 sponsored Polygon mainnet transactions from an empty
-org wallet, executed by KeeperHub against a real, finally-resolved Polymarket
-condition (gate OPEN on-chain), all read back and PROVEN by `pnpm verify`.
+The last loop is the point: a proven settlement is not the end of the story —
+it is **executable state**. Obligation #2's unlock condition is obligation #1's
+independently verified `PROVEN_SETTLED` state, frozen into #2's envelope at arm
+time. Settlement proof stops being a receipt and becomes the authorization for
+the next obligation.
+
+**REAL POLYGON PROOF — chain closed.** One live chain, two obligations, six
+sponsored Polygon mainnet transactions from an empty org wallet, executed by
+KeeperHub against two real, finally-resolved Polymarket conditions (gate OPEN
+on-chain). Obligation #2 executed **only because** obligation #1 was
+independently `PROVEN_SETTLED`:
 
 ```
-REAL POLYGON PROOF            3 verified Polygon mainnet transactions
-KEEPERHUB EXECUTION           executionId + sponsored flag on every one
-POLYMARKET CONDITION          real resolved CTF condition (0x0c481aa6…eae0)
-GATES                         finality (BLOCKED), immutability, exactly-once
-NONZERO SETTLEMENT STATUS     PENDING ~1 USDC collateral (honest, not claimed)
+CHAIN CLOSED — chain-mu59jxk3
+
+  OBLIGATION #1  policy-acb077c5   PROVEN_SETTLED   condition 0x0c481aa6…eae0
+    approve  tx 0xf70b1f7961f00dda…fb2decbd2
+    redeem   tx 0x65005ee0e187ecf6…daf51adb74   KeeperHub dmr1g67zmpejb6f94i8hp
+    route    tx 0x21a05f325036b074…910ac303     KeeperHub kcdpl20ya8ddd315z35jo
+  →  proof verified on chain (FINALITY + INTEGRITY + EXECUTION + POSTCONDITION)
+
+  OBLIGATION #2  policy-3f07ac4b   PROVEN_SETTLED   condition 0x3733a1b6…9b3868
+    UNLOCKED BY policy-acb077c5 PROVEN_SETTLED   (gate 1.5, fail-closed)
+    approve  tx 0x29e3824c11202e56…a61956ba6
+    redeem   tx 0x6588bfc4ab65bb5f…c22a1551     KeeperHub kgnq0yepac4wiksc6wcf2
+    route    tx 0xb76fbaa71f4b0ac3…c3429bae     KeeperHub a56nmmxi3ib9hzgydfwgk
+
+  CHAIN CLOSED — 2 obligations, value 0 USDC per leg (pending collateral)
 ```
 
-**NONZERO SETTLEMENT — PENDING COLLATERAL.** The live proof moves zero USDC.
-Completing the value leg needs ~1 USDC in the org wallet
-`0x9f7de2b79d93adb3d3ef6501ca6d8c8c00a2e6fc` (gas sponsored). Until that lands,
-the submission claims only what is proven and marks the rest PENDING.
+**ZERO ASSET VALUE / NONZERO PENDING.** Every transaction above is real and
+sponsored on Polygon mainnet, but moves **zero USDC** — so the *mechanism*
+(including the unlock gate) is proven while the *value* leg is not. Completing
+value settlement needs ~1 USDC in the org wallet
+`0x9f7de2b79d93adb3d3ef6501ca6d8c8c00a2e6fc` (gas sponsored); the identical
+chained path then moves face value. Until then the submission claims only what
+is proven and marks the rest PENDING.
 
 Part of the KeeperHub "Agent Economy" Hackathon (main track) and the Arc
 Testnet chain-registration bounty (issue #2230, PR merged alongside).
@@ -92,6 +121,7 @@ remembering, reinterpretating, or approving it later:
 5. EXECUTE  — KeeperHub runs the frozen workflow: redeem + route.
 6. VERIFY   — independent on-chain re-read: finality + integrity + execution + postcondition.
 7. SETTLED  — obligation proven discharged; execution id + tx + verification in the ledger.
+8. CHAIN    — that proof unlocks a chained obligation (dependsOn); it repeats 4-7 and closes.
 ```
 
 Each stage is a tracked state in `src/policy/ledger.ts`. Transitions are only
@@ -100,6 +130,12 @@ Tokens contract is the only thing that moves an obligation to EXECUTING; a
 provisional proposal only ever produces `WAITING_FINALITY`. Execution closes as
 `SETTLED` only when `pnpm verify` proves finality, integrity, on-chain execution
 and beneficiary possession — never on KeeperHub's receipt alone.
+
+The chain stage is enforced by gate 1.5 (`src/policy/chain.ts`): a chained
+obligation cannot execute until its predecessor is independently `PROVEN_SETTLED`
+on chain, and the dependency itself is part of the frozen envelope — re-pointing
+it changes the hash and voids the obligation. `pnpm chain` runs the whole thing
+end to end.
 
 ## Architecture
 
@@ -208,9 +244,10 @@ pnpm watch                            # poll: provisional -> WAITING_FINALITY (b
 pnpm execute --policy-id=<policy-id>  # settle only the frozen obligation (finality + hash verified)
 pnpm sanity                           # zero-value sponsored execution proof (empty wallet, real tx)
 pnpm prototype --beneficiary=<addr>   # full KeeperHub-executed lifecycle (sponsored)
-pnpm proofs                           # zero-funding gate proofs: obligation immutability + blocked execute
+pnpm proofs                           # zero-funding gate proofs: immutability + blocked + exactly-once + chain
 pnpm verify --policy-id=<id>          # independent on-chain settlement verification (PROVEN/BLOCKED/DISPUTED)
 pnpm zero-value --resolved=<cond> --parent=<parent> [--beneficiary=<addr>]   # Layer-1 proof on a really-resolved condition
+pnpm chain --resolved=<condA> --chain-resolution=<condB> [--beneficiary=<addr>]   # full two-obligation chain -> CHAIN CLOSED
 pnpm site:export                      # static, backend-free dashboard in dist/index.html (deploy to any host)
 ```
 
@@ -258,6 +295,14 @@ The `kh_` org key is required for the sponsored execution path (`sanity`,
 - **Finality gate.** A provisional resolution hits `WAITING_FINALITY` and
   *stays there* — settlement is blocked (`SETTLEMENT BLOCKED`). Execution only
   proceeds when `payoutDenominator` is non-zero on Polygon.
+- **Exactly-once.** Settlement consumes the execution authorization (gate 0);
+  a `SETTLED` obligation refuses further payment (`ALREADY SETTLED`). A failed
+  execution stays alive under the same frozen hash for retry — never a new
+  payout.
+- **Chain gate (proof as authorization).** A chained obligation fires only
+  after its predecessor is independently verified `PROVEN_SETTLED` on chain
+  (gate 1.5, `src/policy/chain.ts`). The dependency is part of the frozen
+  envelope, so it cannot be re-pointed after locking.
 - **Preflight the write.** Every broadcast is preceded by a live simulation;
   anything that would revert does not get signed.
 - **Append-only ledger.** Every state change and execution hop is appended to a
@@ -298,7 +343,7 @@ nothing is faked.
   finality gate opens only on real on-chain resolution and the redemption path
   executes through KeeperHub at a real finally-resolved condition — without
   self-creating a condition or needing collateral.
-- **DONE — gate proofs (`pnpm proofs`, zero-funding):** three hard guarantees
+- **DONE — gate proofs (`pnpm proofs`, zero-funding):** four hard guarantees
   demonstrated live from the same modules the product uses, against a scratch
   ledger (`.data/proofs/`): (1) obligation immutability — tampering the
   beneficiary, face value, or condition after locking yields a different
@@ -306,9 +351,21 @@ nothing is faked.
   (2) finality gate — a `WAITING_FINALITY` policy is refused before any
   broadcast (`SETTLEMENT BLOCKED … No irreversible obligation fires on a
   preliminary result`); (3) exactly-once — a `SETTLED` obligation refuses
-  duplicate execution (`ALREADY SETTLED`). The FOMC market is now **finally
-  resolved on-chain (denom 1, YES wins)**, so the same gate demonstrably
-  *opens* for the real conditional payment.
+  duplicate execution (`ALREADY SETTLED`); (4) obligation chain — a chained
+  obligation whose predecessor is only `LOCKED` is refused
+  (`OBLIGATION CHAIN BLOCKED`), and re-pointing the predecessor changes the
+  frozen envelope hash. The FOMC market is now **finally resolved on-chain
+  (denom 1)**, so the same finality gate demonstrably *opens* for the real
+  conditional payment.
+- **DONE — obligation chain, live and CLOSED (`pnpm chain`):** two chained
+  obligations executed through KeeperHub on two real finally-resolved
+  conditions. Obligation #1 `policy-acb077c5` settled and was independently
+  PROVEN; obligation #2 `policy-3f07ac4b` (frozen with `dependsOn
+  policy-acb077c5`) was **unlocked only because #1 was PROVEN_SETTLED** (gate
+  1.5), executed, and was itself independently PROVEN. Six sponsored Polygon
+  mainnet transactions, empty org wallet. Chain `chain-mu59jxk3` reads
+  **CLOSED** in `pnpm status` and on the dashboard. Value 0 USDC per leg
+  (pending collateral) — the mechanism is proven, the value leg is not claimed.
 - **DONE — independent postcondition verification (`pnpm verify`):** the
   real Layer-1 obligation is re-read from Polygon and proven settled on chain:
   FINALITY (denom 1) + INTEGRITY (envelope hash intact) + EXECUTION (tx

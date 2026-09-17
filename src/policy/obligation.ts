@@ -16,6 +16,7 @@ export function obligationEnvelope(input: {
   faceValueUsdc: string;
   finality: "on-chain-ctf";
   redemptionKind: RedemptionKind;
+  dependsOn?: string;
 }): string {
   return keccak256(
     toUtf8Bytes(
@@ -28,6 +29,7 @@ export function obligationEnvelope(input: {
         finality: input.finality,
         settlementCallee: CTF,
         redemption: input.redemptionKind,
+        ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
       })
     )
   );

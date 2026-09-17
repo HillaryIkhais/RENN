@@ -32,6 +32,7 @@ import {
 import type { Policy, RedemptionKind } from "./policy/types.js";
 import { obligationEnvelope } from "./policy/obligation.js";
 import { verifySettlement } from "./policy/verify.js";
+import { assertChainUnlocked, renderChain } from "./policy/chain.js";
 import {
   discoverWallet,
   hasKeeperHubKey,
@@ -198,12 +199,18 @@ async function status(): Promise<void> {
           ` | finality=${p.finality ?? "on-chain-ctf"} | hash=${p.obligationHash.slice(0, 18)}…`
       );
     }
+    if (p.dependsOn) {
+      console.log(`    CHAIN       unlocks after ${p.dependsOn} PROVEN_SETTLED (chain=${p.chainId ?? "-"})`);
+    }
     for (const e of p.events) {
       const tx = e.txHashes?.length ? ` tx=${e.txHashes.join(",")}` : "";
       console.log(`    ${e.at.slice(0, 19)} ${e.type.padEnd(12)} ${e.message ?? ""}${tx}`);
     }
     console.log("");
   }
+
+  const chainLines = await renderChain(policies);
+  for (const line of chainLines) console.log(line);
 }
 
 async function watch(intervalMs = 60_000): Promise<void> {
@@ -416,7 +423,8 @@ async function executeWorkflow(policyId: string): Promise<void> {
 
   // Hard gate 1: obligation immutability. Recompute the frozen envelope from
   // the current policy record; any drift means the intent was edited, and the
-  // commitment is void rather than reinterpreted.
+  // commitment is void rather than reinterpreted. The recompute includes the
+  // chain dependency (dependsOn) so re-pointing a chained obligation also voids.
   if (policy.obligationHash) {
     const expected = obligationEnvelope({
       conditionId: policy.conditionId,
@@ -425,6 +433,7 @@ async function executeWorkflow(policyId: string): Promise<void> {
       faceValueUsdc: policy.faceValueUsdc ?? policy.positionValueUsdc ?? "0",
       finality: "on-chain-ctf",
       redemptionKind: policy.redemptionKind,
+      ...(policy.dependsOn ? { dependsOn: policy.dependsOn } : {}),
     });
     if (expected !== policy.obligationHash) {
       throw new Error(
@@ -432,6 +441,17 @@ async function executeWorkflow(policyId: string): Promise<void> {
           "Settlement is void; re-arm the obligation."
       );
     }
+  }
+
+  // Hard gate 1.5: obligation chain — settlement proof is executable state.
+  // A chained obligation only fires after its predecessor is independently
+  // verified PROVEN_SETTLED on chain. Fail-closed: no predecessor, unverified
+  // predecessor, or unsettled predecessor -> the gate stays closed.
+  if (policy.dependsOn) {
+    const chainUnlock = await assertChainUnlocked(policyId);
+    console.log(
+      `[chain] OBLIGATION UNLOCKED by ${chainUnlock.predecessorId} (${chainUnlock.predecessorProof})`
+    );
   }
 
   // Hard gate 2: finality. A provisional outcome can never cause an
@@ -601,6 +621,9 @@ async function main(): Promise<void> {
       condition: { type: "string" },
       resolved: { type: "string" },
       parent: { type: "string" },
+      chain: { type: "string" },
+      "after": { type: "string" },
+      "chain-resolution": { type: "string" },
     },
   });
   const cmd = positionals[0] ?? "status";
@@ -671,6 +694,34 @@ async function main(): Promise<void> {
         winner,
         resolvedConditionId: values.resolved ?? values.condition,
         resolvedParentCollectionId: values.parent,
+        chainId: values.chain,
+        dependsOn: values.after,
+      });
+      break;
+    }
+    case "chain": {
+      if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
+      const beneficiary =
+        values.beneficiary ?? values.treasury ?? process.env.TREASURY_ADDRESS;
+      if (!beneficiary) {
+        throw new Error("Specify --beneficiary=<addr> (or TREASURY_ADDRESS) so the chain has a recipient.");
+      }
+      const conditionA = values.resolved ?? values.condition;
+      const conditionB = values["chain-resolution"];
+      if (!conditionA || !conditionB || conditionA === conditionB) {
+        throw new Error(
+          "Specify --resolved=<condZ> and --chain-resolution=<condZ> as two distinct " +
+            "already-finally-resolved Polymarket conditions for the two chain legs."
+        );
+      }
+      const { runChainProof } = await import("./keeperhub/prototype.js");
+      await runChainProof({
+        beneficiary,
+        faceValueUsdc: values.face ?? values.amount ?? "0",
+        winner: (values.winner ?? "YES") as "YES" | "NO",
+        conditionA: conditionA,
+        parentA: values.parent,
+        conditionB: conditionB,
       });
       break;
     }
@@ -722,15 +773,23 @@ Commands:
                            split -> WAITING FINALITY (blocked) -> resolve -> verify final ->
                            redeem -> route. Needs ~face USDC (6dp) in the org wallet; gas is sponsored.
                            Receipts: .data/prototype.jsonl
-  zero-value --beneficiary=<addr> [--winner=YES|NO]
-                           [--resolved=<resolvedConditionId>]
-                           [--parent=<resolvedParentCollectionId>]
-                           same lifecycle with every amount 0: locked obligation -> finality gate ->
-                           KeeperHub redemption, proven by real Polygon executions with an EMPTY
-                           org wallet (sponsored, no collateral needed). Receipts: .data/zero-value.jsonl
-                           Point --resolved at a real, already-finally-resolved Polymarket condition
-                           to run the redemption + routing hops through a gate that is OPEN on-chain
-                           (no self-created condition, no reporter whitelist dependency).
+zero-value --beneficiary=<addr> [--winner=YES|NO]
+                            [--resolved=<resolvedConditionId>]
+                            [--parent=<resolvedParentCollectionId>]
+                            [--chain=<chainId> --after=<policyId>]
+                            same lifecycle with every amount 0: locked obligation -> finality gate ->
+                            KeeperHub redemption, proven by real Polygon executions with an EMPTY
+                            org wallet (sponsored, no collateral needed). Receipts: .data/zero-value.jsonl
+                            Point --resolved at a real, already-finally-resolved Polymarket condition
+                            to run the redemption + routing hops through a gate that is OPEN on-chain
+                            (no self-created condition, no reporter whitelist dependency).
+                            With --chain/--after the obligation is chained: it stays locked until the
+                            predecessor is independently PROVEN_SETTLED (gate 1.5, fail-closed).
+   chain --beneficiary=<addr> --resolved=<condA> --chain-resolution=<condB>
+                            run the full two-obligation chain: obligation #1 settles and is PROVEN,
+                            its proof unlocks obligation #2 (dependsOn #1) which executes and is
+                            independently verified; both close PROVEN and the chain reads CLOSED.
+                            Zero-value (honest): every amount 0 until collateral lands in the wallet.
 
 Env:
   EOA_PRIVATE_KEY          wallet that owns positions (demo + Polygon)

@@ -11,9 +11,12 @@ import {
 import { obligationEnvelope } from "../policy/obligation.js";
 import {
   arm as armPolicy,
+  getPolicy,
   recordTransaction,
   transition,
 } from "../policy/ledger.js";
+import { assertChainUnlocked } from "../policy/chain.js";
+import { verifySettlement } from "../policy/verify.js";
 
 const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -41,6 +44,10 @@ export interface RedemptionOptions {
    */
   resolvedConditionId?: string;
   resolvedParentCollectionId?: string;
+  /** obligation chain grouping (proof becomes authorization) */
+  chainId?: string;
+  /** preceding obligation whose PROVEN_SETTLED unlocks this one */
+  dependsOn?: string;
 }
 
 export interface RedemptionReceipt {
@@ -52,6 +59,81 @@ export interface RedemptionReceipt {
   txLink: string | null;
   sponsored: boolean;
   message: string;
+}
+
+export interface RunChainProofOptions {
+  beneficiary: string;
+  faceValueUsdc: string;
+  winner?: "YES" | "NO";
+  conditionA: string;
+  parentA?: string;
+  conditionB: string;
+}
+
+/**
+ * The obligation chain demo — "settlement proof is executable state".
+ *
+ *   OBLIGATION #1 (condition A)  -> executes -> independently PROVEN_SETTLED
+ *   OBLIGATION #2 (condition B, dependsOn #1) -> gate 1.5 unlocks only because
+ *     #1 is PROVEN_SETTLED -> executes -> independently PROVEN_SETTLED
+ *   CHAIN CLOSED
+ *
+ * Zero-value: both legs move 0 USDC and are independently verified as such,
+ * so the mechanism — including the unlock gate — is proven on real Polygon
+ * through KeeperHub with an empty org wallet. When collateral lands in the
+ * wallet, the same path with a nonzero face value is identically enforced.
+ */
+export async function runChainProof(opts: RunChainProofOptions): Promise<void> {
+  console.log(`\n${"=".repeat(78)}`);
+  console.log("  OBLIGATION CHAIN — settlement proof is executable state");
+  console.log(`${"=".repeat(78)}`);
+
+  const face = opts.faceValueUsdc ?? "0";
+  console.log(
+    `\n  legs: ${opts.winner ?? "YES"} winning on two real finally-resolved conditions\n` +
+      `  value: ${face} USDC per leg (zero-value demo — honest: pending collateral)\n` +
+      `  beneficiary: ${opts.beneficiary}\n`
+  );
+
+  const chainId = `chain-${Date.now().toString(36)}`;
+
+  console.log(`\n--- OBLIGATION #1 (condition A) ---`);
+  const leg1 = await runRedemptionLoop({
+    zero: true,
+    faceValueUsdc: face,
+    beneficiary: opts.beneficiary,
+    winner: opts.winner,
+    resolvedConditionId: opts.conditionA,
+    resolvedParentCollectionId: opts.parentA,
+    chainId,
+  });
+  const policy1 = getPolicy(leg1.policyId);
+  if (policy1?.state !== "SETTLED") {
+    throw new Error("Obligation #1 did not reach SETTLED — chain cannot proceed.");
+  }
+
+  console.log(`\n--- OBLIGATION #2 (condition B, dependsOn #1) ---`);
+  const leg2 = await runRedemptionLoop({
+    zero: true,
+    faceValueUsdc: face,
+    beneficiary: opts.beneficiary,
+    winner: opts.winner,
+    resolvedConditionId: opts.conditionB,
+    chainId,
+    dependsOn: leg1.policyId,
+  });
+  const policy2 = getPolicy(leg2.policyId);
+  if (policy2?.state !== "SETTLED") {
+    throw new Error("Obligation #2 did not reach SETTLED — chain incomplete.");
+  }
+
+  console.log(`\n${"=".repeat(78)}`);
+  console.log(`CHAIN CLOSED — ${chainId}`);
+  console.log(`  OBLIGATION #1 ${leg1.policyId}  PROVEN_SETTLED  (condition A)`);
+  console.log(`  OBLIGATION #2 ${leg2.policyId}  PROVEN_SETTLED  (unlocked by #1, condition B)`);
+  console.log(`  value ${face} USDC per leg — independently verified on chain`);
+  console.log(`  Ledger: pnpm status | verify each: pnpm verify --policy-id=<id>`);
+  console.log(`${"=".repeat(78)}`);
 }
 
 const PROTOTYPE_FILE = ".data/prototype.jsonl";
@@ -77,17 +159,17 @@ function recordReceipt(file: string, row: RedemptionReceipt): void {
  * in zero-value mode scrap: zero-value mode proofs the fetch, and if the
  * caller holds collateral the same path moves face value.
  */
-export async function runPrototype(opts: RedemptionOptions): Promise<void> {
-  await runRedemptionLoop({ ...opts, zero: false });
+export async function runPrototype(opts: RedemptionOptions): Promise<{ policyId: string }> {
+  return runRedemptionLoop({ ...opts, zero: false });
 }
 
-export async function runZeroValueProof(opts: RedemptionOptions): Promise<void> {
-  await runRedemptionLoop({ ...opts, zero: true });
+export async function runZeroValueProof(opts: RedemptionOptions): Promise<{ policyId: string }> {
+  return runRedemptionLoop({ ...opts, zero: true });
 }
 
 async function runRedemptionLoop(
   opts: RedemptionOptions & { zero: boolean }
-): Promise<void> {
+): Promise<{ policyId: string }> {
   const amount = parseUnits(opts.faceValueUsdc, 6).toString();
   const numerators: [number, number] = opts.winner === "NO" ? [0, 1] : [1, 0];
   const walletAddress = (await discoverWallet()).walletAddress;
@@ -110,6 +192,7 @@ async function runRedemptionLoop(
     faceValueUsdc: opts.faceValueUsdc,
     finality: "on-chain-ctf",
     redemptionKind: "classic",
+    ...(opts.dependsOn ? { dependsOn: opts.dependsOn } : {}),
   });
 
   const policy = armPolicy({
@@ -125,6 +208,8 @@ async function runRedemptionLoop(
     treasuryAddress: opts.beneficiary,
     treasuryLabel: opts.zero ? "Zero-value proof beneficiary" : "Prototype beneficiary",
     redemptionKind: "classic",
+    ...(opts.chainId ? { chainId: opts.chainId } : {}),
+    ...(opts.dependsOn ? { dependsOn: opts.dependsOn } : {}),
   });
   transition(
     policy.policyId,
@@ -139,6 +224,48 @@ async function runRedemptionLoop(
       `  finality      on-chain CTF payout state\n` +
       `  envelope hash ${obligationHash.slice(0, 18)}…${obligationHash.slice(-6)}`
   );
+
+  // Gate: if this obligation is chained to a predecessor, it can only execute
+  // after the predecessor's settlement is independently proven on chain.
+  if (opts.dependsOn) {
+    const chainUnlock = await assertChainUnlocked(policy.policyId);
+    console.log(
+      `\n[chain] OBLIGATION UNLOCKED by ${chainUnlock.predecessorId} (${chainUnlock.predecessorProof}) — ` +
+        `settlement proof is executable state`
+    );
+  }
+
+  // Independent postcondition verification before closing (VERIFY stage).
+  const closeSettled = async (
+    step1Hash: string | null,
+    step2Hash: string | null,
+    resolutionDenom: bigint
+  ): Promise<void> => {
+    transition(policy.policyId, "RESOLVED", `Final on-chain resolution: gate open (denom=${resolutionDenom}) — settlement allowed`);
+    transition(policy.policyId, "VERIFYING", "Independent on-chain postcondition verification");
+    const verification = await verifySettlement(policy.policyId);
+    if (verification.verdict !== "PROVEN") {
+      transition(
+        policy.policyId,
+        "FAILED",
+        `Settlement not proven on chain: ${verification.checks
+          .filter((c) => !c.ok)
+          .map((c) => `${c.name}: ${c.detail}`)
+          .join("; ")}`,
+        { verification: verification.verdict, retryable: true }
+      );
+      console.log(`\nVERIFY FAILED (${verification.verdict}); obligation stays alive for retry.`);
+      for (const c of verification.checks) console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
+      return;
+    }
+    transition(policy.policyId, "SETTLED", "KeeperHub redemption + independent postcondition verified (Layer-1 hop)", {
+      redemptionHash: step1Hash,
+      routingHash: step2Hash,
+      verification,
+    });
+    console.log(`\nSETTLED after independent on-chain verification.`);
+    for (const c of verification.checks) console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
+  };
 
   // elp: deploy-mode marker
   const hop = (label: string, step: ExecutionStatusResponse, note: string): void => {
@@ -216,14 +343,10 @@ async function runRedemptionLoop(
     );
     hop("route", step2, "obligation discharged to beneficiary");
 
-    transition(policy.policyId, "RESOLVED", `Final on-chain resolution: gate open (denom=${resolution.payoutDenominator}) — settlement allowed`);
-    transition(policy.policyId, "SETTLED", `Obligation DISCHARGED: ${opts.faceValueUsdc} USDC settled (Layer-1 hop)`, {
-      redemptionHash: step1.transactionHash,
-      routingHash: step2.transactionHash,
-    });
+    await closeSettled(step1.transactionHash, step2.transactionHash, resolution.payoutDenominator);
     console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step2.transactionLink}`);
-    console.log(`\nOBLIGATION DISCHARGED — ${opts.faceValueUsdc} USDC SETTLED (Layer-1 zero-value hop)\n` + `Ledger: pnpm status`);
-    return;
+    console.log(`\nOBLIGATION CLOSED — ${opts.faceValueUsdc} USDC PROVEN SETTLED (Layer-1 zero-value hop)\n` + `Ledger: pnpm status`);
+    return { policyId: policy.policyId };
   }
 
   // --- Self-prepared-condition loop (deterministic demo path) ---
@@ -307,10 +430,9 @@ async function runRedemptionLoop(
     { label: "route face value" }
   );
   hop("route", step4, "obligation discharged to beneficiary");
-  transition(policy.policyId, "SETTLED", `Obligation DISCHARGED: ${opts.faceValueUsdc} USDC settled`, {
-    redemptionExecutionId: step3.executionId,
-    routingExecutionId: step4.executionId,
-  });
+
+  await closeSettled(step3.transactionHash, step4.transactionHash, after.payoutDenominator);
   console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step4.transactionLink}`);
-  console.log(`\nOBLIGATION DISCHARGED — ${opts.faceValueUsdc} USDC SETTLED\n` + `Ledger: pnpm status`);
+  console.log(`\nOBLIGATION CLOSED — ${opts.faceValueUsdc} USDC PROVEN SETTLED\n` + `Ledger: pnpm status`);
+  return { policyId: policy.policyId };
 }

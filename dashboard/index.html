@@ -59,6 +59,18 @@
   .b-cell:nth-child(3) { border-color: rgba(34,211,238,0.4); color: var(--accent2); }
   .b-arrow { color: var(--muted); font-family: var(--mono); }
 
+  .chain { margin-top: 20px; border: 1px solid rgba(52,211,153,0.35); background: var(--panel); border-radius: 14px; padding: 16px 20px; }
+  .chain h3 { margin: 0 0 4px; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--good); }
+  .chain .chain-sub { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .chain .leg { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; padding: 9px 0; border-top: 1px dashed var(--panel-border); }
+  .chain .leg:first-of-type { border-top: none; }
+  .chain .no { color: var(--muted); }
+  .chain .oid { color: var(--accent2); }
+  .chain .st { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--panel-border); text-transform: uppercase; font-size: 10.5px; }
+  .chain .st.SETTLED { color: var(--good); border-color: rgba(52,211,153,0.5); }
+  .chain .unlock { color: var(--accent2); }
+  .chain .closed { margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--good); }
+
   .card { margin-top: 26px; border: 1px solid var(--panel-border); background: var(--panel); border-radius: 14px; overflow: hidden; }
   .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--panel-border); flex-wrap: wrap; }
   .card-head .q { font-size: 15px; font-weight: 600; line-height: 1.35; }
@@ -155,6 +167,7 @@
     <div class="b-cell">KEEPERHUB EXECUTES</div>
   </div>
 
+  <section id="chain"></section>
   <section id="evidence"></section>
   <section id="cards"></section>
 
@@ -273,6 +286,43 @@
     }
   }
 
+  function renderChain() {
+    const box = $("chain");
+    const policies = data.policies || [];
+    const chains = new Map();
+    for (const p of policies) {
+      if (!p.chainId) continue;
+      if (!chains.has(p.chainId)) chains.set(p.chainId, []);
+      chains.get(p.chainId).push(p);
+    }
+    if (chains.size === 0) { box.innerHTML = ""; return; }
+    let html = `<h3>OBLIGATION CHAIN &mdash; SETTLEMENT PROOF IS EXECUTABLE STATE</h3>
+      <div class="chain-sub">A proven settlement becomes the authorization for the next obligation: leg #2 only executes through KeeperHub because leg #1 is independently verified PROVEN_SETTLED on chain.</div>`;
+    for (const [chainId, legs] of chains) {
+      legs.sort((a, b) => {
+        if (!a.dependsOn) return -1;
+        if (!b.dependsOn) return 1;
+        if (a.dependsOn === b.policyId) return -1;
+        if (b.dependsOn === a.policyId) return 1;
+        return 0;
+      });
+      const closed = legs.every((l) => l.state === "SETTLED");
+      legs.forEach((l, i) => {
+        const proven = (l.events || []).some((e) => e.type === "SETTLED" && e.meta && e.meta.verification);
+        html += `<div class="leg">
+          <span class="no">#${i + 1}</span>
+          <span class="oid">${escapeHtml(l.policyId)}</span>
+          <span class="st ${escapeHtml(l.state)}">${escapeHtml(l.state)}</span>
+          <span class="unlock">${i > 0 ? "UNLOCKED BY " + escapeHtml(l.dependsOn) + " PROVEN_SETTLED" : "CHAIN ROOT"}</span>
+          <span>${escapeHtml(l.faceValueUsdc || l.positionValueUsdc || "0")} USDC</span>
+          ${proven ? '<span class="unlock">INDEPENDENT VERIFY: PROVEN</span>' : ""}
+        </div>`;
+      });
+      html += `<div class="closed">CHAIN ${closed ? "CLOSED" : "OPEN"} &mdash; ${escapeHtml(chainId)} &middot; ${legs.length} obligations${closed ? " &middot; PROVEN CHAIN COMPLETE" : ""}</div>`;
+    }
+    box.innerHTML = html;
+  }
+
   async function refresh() {
     try {
       const r = await fetch("/policies");
@@ -288,10 +338,12 @@
     }
     heroState = data.policies[0]?.state ?? "ARMED";
     renderPipeline();
+    renderChain();
     frames();
     $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ");
   }
   renderEvidence();
+  renderChain();
   refresh();
   refreshEvidence();
   if (!EMBEDDED) {

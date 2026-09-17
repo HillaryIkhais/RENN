@@ -45,6 +45,8 @@ async function build(): Promise<void> {
       obligationHash: p.obligationHash,
       treasury: p.treasuryAddress,
       treasuryLabel: p.treasuryLabel,
+      chainId: p.chainId,
+      dependsOn: p.dependsOn,
       resolution: { text: resText, resolved, denominator: denom },
       events: p.events,
     });

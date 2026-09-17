@@ -81,6 +81,8 @@ async function livePolicies() {
       obligationHash: p.obligationHash,
       treasury: p.treasuryAddress,
       treasuryLabel: p.treasuryLabel,
+      chainId: p.chainId,
+      dependsOn: p.dependsOn,
       resolution: { text: resText, resolved: res?.resolved ?? false, denominator: res?.payoutDenominator?.toString() ?? "?" },
       events: p.events,
     });
