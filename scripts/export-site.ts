@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { reload } from "../src/policy/ledger.js";
 import { getResolution, describeResolution } from "../src/polymarket/resolution.js";
+import { runAllAttacks } from "../src/policy/attackmode.js";
 
 async function build(): Promise<void> {
   const ROOT = join(import.meta.dirname, "..");
@@ -72,10 +73,16 @@ async function build(): Promise<void> {
     String(a.at) < String(b.at) ? 1 : String(a.at) > String(b.at) ? -1 : 0
   );
 
+  // Run all attacks through the real engine and bake the results.
+  // In live mode the dashboard will hit /attack endpoints; in static mode
+  // these recorded results are replayed — same engine, same refusals.
+  const attackResults = await runAllAttacks({ policies });
+
   const snapshot = {
     at: new Date().toISOString(),
     policiesPayload,
     evidencePayload: { transactions: txns },
+    attacksPayload: { at: new Date().toISOString(), results: attackResults },
   };
 
   const injected = HTML.replace(

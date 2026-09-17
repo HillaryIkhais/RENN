@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
 import { reload } from "../src/policy/ledger.js";
 import { getResolution, describeResolution } from "../src/polymarket/resolution.js";
+import { runAttack, runAllAttacks, ATTACK_IDS } from "../src/policy/attackmode.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const ROOT = join(import.meta.dirname, "..", "dashboard");
@@ -108,6 +109,26 @@ const server = http.createServer(async (req, res) => {
       const txns = await liveEvidence();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ at: new Date().toISOString(), transactions: txns }, null, 2));
+      return;
+    }
+    if (url.pathname === "/attack") {
+      const name = url.searchParams.get("name");
+      if (!name || !ATTACK_IDS.includes(name as any)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `invalid attack; available: ${ATTACK_IDS.join(", ")}` }));
+        return;
+      }
+      const policies = reload();
+      const result = await runAttack(name, { policies });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ at: new Date().toISOString(), result }, null, 2));
+      return;
+    }
+    if (url.pathname === "/attacks") {
+      const policies = reload();
+      const results = await runAllAttacks({ policies });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
       return;
     }
 
