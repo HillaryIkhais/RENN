@@ -1,4 +1,26 @@
-# Renn
+# RENN
+
+### The next payment only unlocks when the previous payment is proven.
+
+RENN lets agents and applications build financial workflows where settlement becomes executable state.
+
+```text
+EVENT
+  ↓
+OBLIGATION
+  ↓
+PAYMENT
+  ↓
+PROOF
+  ↓
+NEXT PAYMENT
+```
+
+> A transaction receipt is not enough.
+> A successful execution is not enough.
+> RENN independently verifies the actual on-chain settlement before allowing the dependent obligation to execute.
+
+---
 
 **Renn — deterministic settlement gates for agentic onchain execution.**
 

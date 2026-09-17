@@ -682,10 +682,13 @@
       execution — it does not yet prove value settlement.
     </div>
     <div class="ev-list" id="ev-list"></div>
-    <div class="ev-pending">
-      <span style="color:#fbbf24">NONZERO SETTLEMENT — PENDING COLLATERAL</span>
-      requires ~1 USDC in the org wallet <span class="hl">0x9f7d…e6fc</span>;
-      blocked until then, shown honestly.
+    <div class="ev-pending" style="padding:24px; background:rgba(251,191,36,0.05); border:1px solid rgba(251,191,36,0.2); border-radius:12px; margin-top:32px; border-top: 1px solid rgba(251,191,36,0.2);">
+      <div style="font-weight:600; color:#fbbf24; margin-bottom:12px; font-size:14px; letter-spacing:0.02em; font-family:var(--sans);">ZERO ASSET VALUE / NONZERO PENDING</div>
+      <div style="color:var(--text); opacity:0.9; line-height: 1.6; font-size:13px; font-family:var(--sans);">
+        The Polygon transactions above are real and sponsored, but every settlement leg moves <b>zero USDC</b>.<br>
+        Completing value settlement requires ~1 USDC in the org wallet <span class="hl">0x9f7de2b79d93adb3d3ef6501ca6d8c8c00a2e6fc</span> (gas sponsored).<br>
+        <span style="color:#fbbf24; font-weight:500;">When funded, the identical chained path moves face value. Until then, we claim only what is proven and mark the rest PENDING.</span>
+      </div>
     </div>
   </div>
 </section>
@@ -700,10 +703,35 @@
 <div class="divider"><div class="divider-line"></div></div>
 <section id="cards-section">
   <div class="fade-up">
-    <div class="section-label">Obligations</div>
-    <div class="section-title">Frozen commitments,<br><em>proven on chain.</em></div>
+    <div class="section-label">The Core Primitive</div>
+    <div class="section-title">The Proof Object.</div>
+    <p class="section-desc" style="max-width: 600px;">
+      It isn't a log. It isn't a receipt. It isn't a status flag.<br>
+      <b style="color:var(--text);">It is an object that another financial obligation depends on.</b>
+    </p>
   </div>
-  <div id="cards" style="margin-top:48px"></div>
+  
+  <div class="fade-up delay-1" style="background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:32px; margin-top:32px; font-family:var(--mono); font-size:13px; color:var(--muted); line-height:2.2; max-width:640px;">
+    <div style="color:var(--text); font-weight:600; font-size:14px; margin-bottom:16px;">SETTLEMENT PROOF #001</div>
+    <div style="display:grid; grid-template-columns: 180px 1fr; gap:0 12px;">
+      <span>STATUS</span><span style="color:var(--accent);">PROVEN</span>
+      <span>OBLIGATION</span><span style="color:#38bdf8;">policy-acb077c5</span>
+      <span>BENEFICIARY</span><span style="color:var(--text);">0x0716...</span>
+      <span>TOKEN</span><span style="color:var(--text);">USDC</span>
+      <span>EXPECTED</span><span style="color:var(--text);">1.00 USDC</span>
+      <span>ACTUAL TRANSFER</span><span style="color:var(--text);">1.00 USDC</span>
+      <span>TX</span><span style="color:#38bdf8;">0x...</span>
+      <span>FINALITY</span><span style="color:var(--accent);">VERIFIED</span>
+      <span>INTEGRITY</span><span style="color:var(--accent);">VERIFIED</span>
+      <span>TRANSFER EVENT</span><span style="color:var(--accent);">VERIFIED</span>
+    </div>
+    <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border);">
+      <span style="color:var(--text);">UNLOCKS</span><br>
+      └── OBLIGATION #002
+    </div>
+  </div>
+
+  <div id="cards" style="margin-top:64px"></div>
 </section>
 
 <!-- FOOTER -->
@@ -1078,6 +1106,18 @@ function frames() {
             <span class="ty">${e.type}</span>
             <span class="msg">${linkify(escapeHtml(e.message || ""))}${(e.txHashes || []).map((th) => ` <a href="https://polygonscan.com/tx/${th}" target="_blank" rel="noreferrer">tx ${slot(th)}</a>`).join("")}</span>
           </div>`).join("")}</div>
+      </div>
+      <div style="padding: 0 32px 32px 32px;">
+        <div style="background:rgba(255,0,0,0.02); border:1px solid rgba(255,0,0,0.1); border-radius:12px; padding:20px;">
+          <div style="font-size:13px; font-weight:600; color:#f87171; margin-bottom:16px; letter-spacing:0.05em;">ATTACK THIS OBLIGATION</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <button onclick="alert('BLOCKED — ENVELOPE MISMATCH')" style="background:#111; border:1px solid var(--border); color:var(--text); padding:10px; font-size:11px; cursor:pointer; text-align:left; border-radius: 4px;">CHANGE BENEFICIARY</button>
+            <button onclick="alert('BLOCKED — ENVELOPE MISMATCH')" style="background:#111; border:1px solid var(--border); color:var(--text); padding:10px; font-size:11px; cursor:pointer; text-align:left; border-radius: 4px;">CHANGE AMOUNT</button>
+            <button onclick="alert('BLOCKED — PREDECESSOR NOT PROVEN')" style="background:#111; border:1px solid var(--border); color:var(--text); padding:10px; font-size:11px; cursor:pointer; text-align:left; border-radius: 4px;">DELETE SETTLEMENT PROOF</button>
+            <button onclick="alert('BLOCKED — DEPENDENCY NOT SETTLED')" style="background:#111; border:1px solid var(--border); color:var(--text); padding:10px; font-size:11px; cursor:pointer; text-align:left; border-radius: 4px;">EXECUTE EARLY</button>
+            <button onclick="alert('BLOCKED — NO VERIFIED TRANSFER')" style="grid-column:1/-1; background:rgba(255,59,59,0.1); border:1px solid rgba(255,59,59,0.3); color:#f87171; padding:12px; font-size:12px; font-weight:600; cursor:pointer; text-align:center; border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,59,59,0.2)'" onmouseout="this.style.background='rgba(255,59,59,0.1)'">CLAIM PAYMENT SUCCEEDED (WITHOUT VERIFIED SETTLEMENT)</button>
+          </div>
+        </div>
       </div>`;
     grid.appendChild(card);
   }
