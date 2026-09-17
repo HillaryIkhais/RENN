@@ -14,8 +14,8 @@
  * 3. EXACTLY-ONCE — a SETTLED obligation cannot authorize a duplicate payment;
  *    execution authority is consumed by settlement (gate 0). Combined with the
  *    VERIFY stage (pnpm verify --policy-id=...), the loop only closes as
- *    PROVEN: finality + integrity + execution + postcondition, read back from
- *    the chain independently of KeeperHub's own receipt.
+ *    PROVEN: finality + integrity + confirmed distribution tx + exact ERC20
+ *    Transfer event, read back from the chain independently of KeeperHub.
  *
  * 4. OBLIGATION CHAIN — settlement proof is executable state. A chained
  *    obligation (dependsOn) only fires after its predecessor is independently
@@ -220,8 +220,10 @@ async function exactlyOnceProof(): Promise<void> {
   section("Summary");
   console.log("  Settled exactly once -> duplicate execution refused -> no double spend.");
   console.log(
-    "  VERIFY stage: after EXECUTING, Renn independently re-reads finality + tx +\n" +
-      "  beneficiary possession (pnpm verify --policy-id=...) before SETTLED is PROVEN."
+    "  VERIFY stage: after EXECUTING, Renn independently re-reads finality +\n" +
+      "  obligation integrity + the confirmed distribution tx + an exact ERC20\n" +
+      "  Transfer(USDC -> beneficiary, faceValue) event (pnpm verify --policy-id=...)\n" +
+      "  before SETTLED is PROVEN."
   );
 }
 

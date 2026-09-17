@@ -17,6 +17,7 @@ import {
 } from "../policy/ledger.js";
 import { assertChainUnlocked } from "../policy/chain.js";
 import { verifySettlement } from "../policy/verify.js";
+import { recordSettlementProof } from "../policy/proof.js";
 
 const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -187,7 +188,7 @@ async function runRedemptionLoop(
 
   const obligationHash = obligationEnvelope({
     conditionId,
-    parentCollectionId: ZERO32,
+    parentCollectionId,
     beneficiary: opts.beneficiary,
     faceValueUsdc: opts.faceValueUsdc,
     finality: "on-chain-ctf",
@@ -199,7 +200,7 @@ async function runRedemptionLoop(
     marketId: 0,
     question: `${opts.zero ? "ZERO-VALUE" : "PROTOTYPE"}: ${opts.faceValueUsdc} USDC to ${opts.beneficiary.slice(0, 10)}… if ${opts.winner ?? "YES"} (KeeperHub-executed condition)`,
     conditionId,
-    parentCollectionId: ZERO32,
+    parentCollectionId,
     negRisk: false,
     positionValueUsdc: opts.faceValueUsdc,
     faceValueUsdc: opts.faceValueUsdc,
@@ -236,13 +237,18 @@ async function runRedemptionLoop(
   }
 
   // Independent postcondition verification before closing (VERIFY stage).
+  // A redemption without the distribution is never settled: verification
+  // requires the exact ERC20 Transfer event from the distribution tx.
   const closeSettled = async (
-    step1Hash: string | null,
-    step2Hash: string | null,
+    redemptionHash: string | null,
+    distribution: ExecutionStatusResponse,
     resolutionDenom: bigint
   ): Promise<void> => {
     transition(policy.policyId, "RESOLVED", `Final on-chain resolution: gate open (denom=${resolutionDenom}) — settlement allowed`);
-    transition(policy.policyId, "VERIFYING", "Independent on-chain postcondition verification");
+    transition(policy.policyId, "VERIFYING", "Independent on-chain postcondition verification", {
+      executionId: distribution.executionId,
+      sponsored: distribution.sponsored,
+    });
     const verification = await verifySettlement(policy.policyId);
     if (verification.verdict !== "PROVEN") {
       transition(
@@ -258,17 +264,32 @@ async function runRedemptionLoop(
       for (const c of verification.checks) console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
       return;
     }
-    transition(policy.policyId, "SETTLED", "KeeperHub redemption + independent postcondition verified (Layer-1 hop)", {
-      redemptionHash: step1Hash,
-      routingHash: step2Hash,
+    let proofId: string | undefined;
+    if (distribution.transactionHash) {
+      const proof = recordSettlementProof({
+        policy,
+        settlementTxHash: distribution.transactionHash,
+        executionId: distribution.executionId,
+      });
+      proofId = proof.verificationId;
+    }
+    transition(policy.policyId, "SETTLED", "KeeperHub redemption + distribution + independent transfer proof", {
+      redemptionHash,
+      routingHash: distribution.transactionHash,
       verification,
+      proofId,
     });
     console.log(`\nSETTLED after independent on-chain verification.`);
     for (const c of verification.checks) console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
   };
 
   // elp: deploy-mode marker
-  const hop = (label: string, step: ExecutionStatusResponse, note: string): void => {
+  const hop = (
+    label: string,
+    kind: string,
+    step: ExecutionStatusResponse,
+    note: string
+  ): void => {
     recordReceipt(opts.zero ? ZERO_VALUE_FILE : PROTOTYPE_FILE, {
       policyId: policy.policyId,
       conditionId,
@@ -282,6 +303,7 @@ async function runRedemptionLoop(
     recordTransaction(policy.policyId, step.transactionHash ? [step.transactionHash] : [], step.transactionLink ? [step.transactionLink] : [], note, {
       executionId: step.executionId,
       sponsored: step.sponsored,
+      kind,
     });
   };
 
@@ -296,7 +318,7 @@ async function runRedemptionLoop(
     },
     { label: `approve(CTF, ${opts.faceValueUsdc})` }
   );
-  hop("approve", step0, `${opts.faceValueUsdc} USDC approved to CTF`);
+  hop("approve", "approve", step0, `${opts.faceValueUsdc} USDC approved to CTF`);
   console.log(`\n[approve] ${opts.faceValueUsdc} USDC -> CTF — ${step0.transactionLink}`);
 
   // 1. If a real finally-resolved condition was supplied, the gate is already
@@ -326,7 +348,7 @@ async function runRedemptionLoop(
       },
       { label: `redeemPositions(${conditionId.slice(0, 10)}…)` }
     );
-    hop("redeem", step1, "winning shares redeemed on classic CTF path");
+    hop("redeem", "redemption", step1, "winning shares redeemed on classic CTF path");
     console.log(`\n[redeem] winning shares redeemed — ${step1.transactionLink}`);
 
     // 3. Route the zero-value face to the beneficiary (the discharge hop;
@@ -341,9 +363,9 @@ async function runRedemptionLoop(
       },
       { label: "route face value" }
     );
-    hop("route", step2, "obligation discharged to beneficiary");
+    hop("route", "distribution", step2, "obligation discharged to beneficiary");
 
-    await closeSettled(step1.transactionHash, step2.transactionHash, resolution.payoutDenominator);
+    await closeSettled(step1.transactionHash, step2, resolution.payoutDenominator);
     console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step2.transactionLink}`);
     console.log(`\nOBLIGATION CLOSED — ${opts.faceValueUsdc} USDC PROVEN SETTLED (Layer-1 zero-value hop)\n` + `Ledger: pnpm status`);
     return { policyId: policy.policyId };
@@ -366,7 +388,7 @@ async function runRedemptionLoop(
     },
     { label: "prepareCondition" }
   );
-  hop("prepare", step1, "condition created on CTF");
+  hop("prepare", "prepare", step1, "condition created on CTF");
   console.log(`\n[prepare] condition ${conditionId.slice(0, 18)}… — ${step1.transactionLink}`);
 
   // 3. WAITING_FINALITY: the outcome is provisional — settlement blocked.
@@ -392,7 +414,7 @@ async function runRedemptionLoop(
     },
     { label: `reportPayouts(${opts.winner ?? "YES"})` }
   );
-  hop("resolve", step2, "payout reported on chain");
+  hop("resolve", "resolve", step2, "payout reported on chain");
   console.log(`\n[resolve] reported ${opts.winner ?? "YES"} — ${step2.transactionLink}`);
 
   // 5. Finality verified by reading the on-chain payout state back.
@@ -409,12 +431,12 @@ async function runRedemptionLoop(
       contractAddress: CTF,
       chainId: "137",
       functionName: "redeemPositions",
-      functionArgs: [USDC, ZERO32, conditionId, [1, 2]],
+      functionArgs: [USDC, parentCollectionId, conditionId, [1, 2]],
       abi: CTF_WRITE,
     },
     { label: "redeemPositions" }
   );
-  hop("redeem", step3, "winning share redeemed");
+  hop("redeem", "redemption", step3, "winning share redeemed");
   console.log(`\n[redeem] winning share redeemed — ${step3.transactionLink}`);
   transition(policy.policyId, "EXECUTING", "KeeperHub redemption in progress");
 
@@ -429,9 +451,9 @@ async function runRedemptionLoop(
     },
     { label: "route face value" }
   );
-  hop("route", step4, "obligation discharged to beneficiary");
+  hop("route", "distribution", step4, "obligation discharged to beneficiary");
 
-  await closeSettled(step3.transactionHash, step4.transactionHash, after.payoutDenominator);
+  await closeSettled(step3.transactionHash, step4, after.payoutDenominator);
   console.log(`\n[route] ${opts.faceValueUsdc} USDC -> ${opts.beneficiary} — ${step4.transactionLink}`);
   console.log(`\nOBLIGATION CLOSED — ${opts.faceValueUsdc} USDC PROVEN SETTLED\n` + `Ledger: pnpm status`);
   return { policyId: policy.policyId };

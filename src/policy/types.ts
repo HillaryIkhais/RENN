@@ -45,12 +45,38 @@ export interface PolicyInput {
   dependsOn?: string;
 }
 
+/**
+ * Immutable, independently verified settlement proof. This is the
+ * "authorization object": once an obligation is PROVEN_SETTLED, this record is
+ * persisted and a chained obligation references it (never merely
+ * `state === SETTLED`) as its unlock condition.
+ */
+export interface SettlementProof {
+  policyId: string;
+  /** the exact distribution transaction that moved value to the beneficiary */
+  settlementTxHash: string;
+  beneficiary: string;
+  /** exact obligated amount in USDC UI units */
+  amountUsdc: string;
+  /** ERC20 token the settlement moved (USDC on Polygon) */
+  tokenAddress: string;
+  conditionId: string;
+  /** the frozen obligation this proof discharges */
+  obligationHash: string;
+  executionId?: string;
+  verifiedAt: string;
+  /** keccak256 of the canonical proof payload — tamper-evident id */
+  verificationId: string;
+}
+
 export interface Policy extends PolicyInput {
   policyId: string;
   state: PolicyState;
   createdAt: string;
   updatedAt: string;
   events: PolicyEvent[];
+  /** persisted once the obligation closes as PROVEN_SETTLED */
+  proof?: SettlementProof;
 }
 
 export type PolicyEventType =
@@ -61,6 +87,7 @@ export type PolicyEventType =
   | "EXECUTING"
   | "VERIFYING"
   | "SETTLED"
+  | "PROOF"
   | "FAILED"
   | "EXPIRED"
   | "TRANSACTION"

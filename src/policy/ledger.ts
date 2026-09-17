@@ -2,7 +2,13 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DATA_DIR } from "../config.js";
-import type { Policy, PolicyEvent, PolicyEventType, PolicyInput } from "./types.js";
+import type {
+  Policy,
+  PolicyEvent,
+  PolicyEventType,
+  PolicyInput,
+  SettlementProof,
+} from "./types.js";
 
 const LEDGER_FILE = join(DATA_DIR, "ledger.jsonl");
 
@@ -63,6 +69,9 @@ export function reload(): Policy[] {
     if (entry.event.meta?.policy) {
       Object.assign(policy, entry.event.meta.policy);
     }
+    if (entry.event.meta?.proof) {
+      policy.proof = entry.event.meta.proof as SettlementProof;
+    }
   }
   return [...policies.values()];
 }
@@ -116,6 +125,21 @@ export function recordTransaction(
     txLinks,
     message,
     meta,
+  });
+  return getPolicy(policyId);
+}
+
+/**
+ * Persist the immutable settlement proof for a PROVEN obligation. This is the
+ * authorization object a chained obligation references.
+ */
+export function recordProof(policyId: string, proof: SettlementProof): Policy | undefined {
+  const at = new Date().toISOString();
+  append(policyId, {
+    at,
+    type: "PROOF",
+    message: `Settlement proof ${proof.verificationId.slice(0, 18)}… persisted for ${proof.settlementTxHash.slice(0, 18)}…`,
+    meta: { proof },
   });
   return getPolicy(policyId);
 }

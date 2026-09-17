@@ -87,7 +87,8 @@ verified):
 CTF contract at `0x4D97…6045`. But the important part is the next command:
 `pnpm verify` does not trust "the tx exists" or "KeeperHub said completed". It
 re-reads Polygon itself: finality (denom 1 on chain), envelope integrity,
-confirmed transaction, beneficiary possession. **OBLIGATION PROVEN SETTLED.**]
+confirmed distribution transaction, exact ERC20 Transfer event. **OBLIGATION
+PROVEN SETTLED.**]
 
 ## Take 4 — The obligation chain: a proven settlement becomes the next authorization (2:20–2:50)
 
@@ -146,7 +147,7 @@ is probabilistic; settlement isn't. Repo and docs are linked below.]
 
 1. [x] Three real sponsored Polygon hashes from the Layer-1 proof
 2. [x] `pnpm proofs` outputs (immutability + blocked + exactly-once + chain) — scratch-ledger run
-3. [x] `pnpm verify` output (PROVEN: finality + integrity + execution + postcondition)
+3. [x] `pnpm verify` output (PROVEN: finality + integrity + distribution + exact Transfer)
 4. [x] `sanity` sponsored Base hash — `0xd92588006e35…511c6d` (approve 0, sponsored)
 5. [x] `pnpm chain` output — chain `chain-mu59jxk3` CLOSED, six sponsored Polygon hashes, #2 unlocked by #1 PROVEN_SETTLED
 6. [ ] Dashboard screenshots with the LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE strip + OBLIGATION CHAIN — CHAIN CLOSED + NONZERO SETTLEMENT — PENDING COLLATERAL card

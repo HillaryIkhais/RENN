@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { Wallet, formatUnits } from "ethers";
+import { Wallet, formatUnits, parseUnits } from "ethers";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "dotenv";
@@ -12,7 +12,7 @@ import {
   USDC_E,
   requireEnv,
 } from "./config.js";
-import { provider } from "./polymarket/contracts.js";
+import { provider, jsonAbi } from "./polymarket/contracts.js";
 import { findMarkets, getMarket } from "./polymarket/gamma.js";
 import {
   describeResolution,
@@ -21,7 +21,12 @@ import {
 import {
   classicRedeem,
 } from "./polymarket/redemption.js";
-import { buildRedemptionWorkflow, type WorkflowEnvelope } from "./keeperhub/workflow.js";
+import {
+  buildRedemptionWorkflow,
+  executableSteps,
+  type WorkflowEnvelope,
+  type WorkflowExecStep,
+} from "./keeperhub/workflow.js";
 import {
   arm as armPolicy,
   getPolicy,
@@ -34,11 +39,20 @@ import { obligationEnvelope } from "./policy/obligation.js";
 import { verifySettlement } from "./policy/verify.js";
 import { assertChainUnlocked, renderChain } from "./policy/chain.js";
 import {
+  assertFinalityUnblocked,
+  assertNotSettled,
+  assertObligationIntact,
+} from "./policy/gates.js";
+import { recordSettlementProof } from "./policy/proof.js";
+import {
   discoverWallet,
   hasKeeperHubKey,
   runContractCall,
+  type ContractCallInput,
 } from "./keeperhub/client.js";
 import { preflight, renderPreflight, zeroValueApproveStep } from "./gas/preflight.js";
+
+const TRANSFER_ABI = jsonAbi(["function transfer(address,uint256) returns (bool)"]);
 
 const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const GAMMA_MARKET_PARAMS = {
@@ -400,20 +414,40 @@ function writeDemoState(state: DemoState): void {
   writeFileSync(DEMO_STATE_FILE, JSON.stringify(state, null, 2));
 }
 
+function stepKind(step: WorkflowExecStep): string {
+  if (step.kind === "transfer-token") return "distribution";
+  if (step.nodeId === "redeem") return "redemption";
+  return step.nodeId;
+}
+
+function stepInput(step: WorkflowExecStep): ContractCallInput {
+  if (step.kind === "transfer-token") {
+    return {
+      contractAddress: step.tokenAddress ?? USDC,
+      chainId: step.network,
+      functionName: "transfer",
+      functionArgs: [step.recipient ?? "", parseUnits(step.amountUi ?? "0", 6)],
+      abi: TRANSFER_ABI,
+    };
+  }
+  return {
+    contractAddress: step.contractAddress ?? "",
+    chainId: step.network,
+    functionName: step.functionName ?? "",
+    functionArgs: step.functionArgs,
+    abi: step.abi,
+  };
+}
+
 async function executeWorkflow(policyId: string): Promise<void> {
   const policy = getPolicy(policyId);
   if (!policy) throw new Error(`No policy ${policyId}`);
   if (!hasKeeperHubKey()) throw new Error(requireKeeperHubKeyMessage());
 
-  // Hard gate 0: exactly-once. An obligation that is already SETTLED or past
-  // finality cannot be re-executed into a fresh payment; the authorization for
-  // this obligation has already been fully consumed.
-  if (policy.state === "SETTLED") {
-    throw new Error(
-      "ALREADY SETTLED: obligation is closed; a settled obligation cannot authorize " +
-        "another payment. Re-arm a new obligation to commit new value."
-    );
-  }
+  // Hard gate 0: exactly-once. An obligation that is already SETTLED cannot be
+  // re-executed into a fresh payment; the authorization for this obligation has
+  // already been fully consumed.
+  assertNotSettled(policy);
   if (policy.state === "EXPIRED" || policy.state === "FAILED") {
     // A failed execution keeps the SAME obligation alive (same frozen hash,
     // same idempotency boundary) so retry is permitted — but a retry can only
@@ -421,32 +455,12 @@ async function executeWorkflow(policyId: string): Promise<void> {
     console.log(`Obligation state ${policy.state}: retrying the same frozen obligation.`);
   }
 
-  // Hard gate 1: obligation immutability. Recompute the frozen envelope from
-  // the current policy record; any drift means the intent was edited, and the
-  // commitment is void rather than reinterpreted. The recompute includes the
-  // chain dependency (dependsOn) so re-pointing a chained obligation also voids.
-  if (policy.obligationHash) {
-    const expected = obligationEnvelope({
-      conditionId: policy.conditionId,
-      parentCollectionId: policy.parentCollectionId,
-      beneficiary: policy.treasuryAddress,
-      faceValueUsdc: policy.faceValueUsdc ?? policy.positionValueUsdc ?? "0",
-      finality: "on-chain-ctf",
-      redemptionKind: policy.redemptionKind,
-      ...(policy.dependsOn ? { dependsOn: policy.dependsOn } : {}),
-    });
-    if (expected !== policy.obligationHash) {
-      throw new Error(
-        "LOCKED OBLIGATION MISMATCH: policy fields no longer match the frozen obligation hash. " +
-          "Settlement is void; re-arm the obligation."
-      );
-    }
-  }
+  // Hard gate 1: obligation immutability.
+  assertObligationIntact(policy);
 
   // Hard gate 1.5: obligation chain — settlement proof is executable state.
   // A chained obligation only fires after its predecessor is independently
-  // verified PROVEN_SETTLED on chain. Fail-closed: no predecessor, unverified
-  // predecessor, or unsettled predecessor -> the gate stays closed.
+  // verified PROVEN_SETTLED on chain (with a valid persisted proof).
   if (policy.dependsOn) {
     const chainUnlock = await assertChainUnlocked(policyId);
     console.log(
@@ -454,78 +468,86 @@ async function executeWorkflow(policyId: string): Promise<void> {
     );
   }
 
-  // Hard gate 2: finality. A provisional outcome can never cause an
-  // irreversible settlement.
-  if (policy.state === "WAITING_FINALITY") {
+  // Hard gate 2: finality state.
+  assertFinalityUnblocked(policy);
+
+  // Hard gate 2b: live finality read. Re-read the CTF payout state before any
+  // write so a provisional outcome can never cause an irreversible settlement,
+  // even if the local state drifted.
+  const resolution = await getResolution(policy.conditionId);
+  if (!resolution.resolved || resolution.payoutDenominator <= 0n) {
     throw new Error(
-      "SETTLEMENT BLOCKED: the outcome is provisional (finality window open). " +
+      "SETTLEMENT BLOCKED: payout state is not final on chain (denom 0). " +
         "No irreversible obligation fires on a preliminary result."
     );
   }
 
-  transition(policy.policyId, "EXECUTING", "Safe execution: simulate the redemption, then broadcast");
-
-  const redeemNode = (policy.workflow as WorkflowEnvelope | undefined)?.nodes.find(
-    (n) => n.id === "redeem"
-  );
-  if (!redeemNode) {
-    throw new Error(`Policy ${policyId} has no redeem node in its staged workflow`);
+  // The executable path runs EVERY write node in the staged workflow in order:
+  // redemption (collect the winning collateral) AND distribution (route the
+  // obligated USDC to the frozen beneficiary). A redemption alone never closes
+  // the obligation.
+  const steps = executableSteps(policy.workflow as WorkflowEnvelope | undefined);
+  if (steps.length === 0) {
+    throw new Error(`Policy ${policyId} has no executable workflow steps`);
   }
-  const config = redeemNode.data.config as {
-    network?: string;
-    contractAddress?: string;
-    abi?: string;
-    abiFunction?: string;
-    functionArgs?: unknown[];
-  };
-  const txResult = await runContractCall(
-    {
-      contractAddress: config.contractAddress ?? "",
-      chainId: config.network ?? "137",
-      functionName: config.abiFunction ?? "redeemPositions",
-      functionArgs: config.functionArgs,
-      abi: config.abi,
-    },
-    { label: policy.policyId }
-  );
 
-  if (txResult.status !== "completed") {
+  transition(policyId, "EXECUTING", "Safe execution: simulate each step, then broadcast");
+  console.log(`Executing ${steps.length} step(s): ${steps.map((s) => s.nodeId).join(" -> ")}`);
+
+  const executed: Array<{ step: WorkflowExecStep; executionId: string; txHash: string | null }> = [];
+  for (const step of steps) {
+    const txResult = await runContractCall(stepInput(step), {
+      label: `${policy.policyId}:${step.nodeId}`,
+    });
+    if (txResult.status !== "completed") {
+      transition(
+        policyId,
+        "FAILED",
+        `KeeperHub step ${step.nodeId} (${txResult.executionId}) ended in ${txResult.status}: ${txResult.error ?? "see KeeperHub"}`,
+        { executionId: txResult.executionId, retryable: true }
+      );
+      throw new Error(
+        `KeeperHub step ${step.nodeId} (${txResult.executionId}) ended in ${txResult.status}: ` +
+          `${txResult.error ?? "see KeeperHub"}. The obligation is still alive (same frozen hash); ` +
+          `retry with pnpm execute --policy-id=${policy.policyId}.`
+      );
+    }
+    const hash = txResult.transactionHash ?? null;
+    recordTransaction(
+      policyId,
+      hash ? [hash] : [],
+      txResult.transactionLink ? [txResult.transactionLink] : [],
+      `${step.label} via KeeperHub`,
+      { executionId: txResult.executionId, sponsored: txResult.sponsored, kind: stepKind(step) }
+    );
+    executed.push({ step, executionId: txResult.executionId, txHash: hash });
+  }
+
+  const distribution = executed.find((e) => stepKind(e.step) === "distribution");
+  if (!distribution || !distribution.txHash) {
     transition(
-      policy.policyId,
+      policyId,
       "FAILED",
-      `KeeperHub execution ${txResult.executionId} ended in ${txResult.status}: ${txResult.error ?? "see KeeperHub"}`,
-      { executionId: txResult.executionId, retryable: true }
+      "No confirmed USDC distribution transaction — redemption without distribution cannot settle.",
+      { retryable: true }
     );
-    throw new Error(
-      `KeeperHub execution ${txResult.executionId} ended in ${txResult.status}: ${txResult.error ?? "see KeeperHub"}. ` +
-        `The obligation is still alive (same frozen hash); retry with pnpm execute --policy-id=${policy.policyId}.`
-    );
+    console.log("\nNo distribution transaction recorded; obligation NOT settled (stays alive for retry).");
+    return;
   }
-
-  const hash = txResult.transactionHash ?? "";
-  const link = txResult.transactionLink ?? "";
-  const records = hash ? [hash] : [];
-  const links = link ? [link] : [];
-  recordTransaction(policy.policyId, records, links, "Redeemed winning CTF shares via KeeperHub", {
-    executionId: txResult.executionId,
-    sponsored: txResult.sponsored,
-    result: txResult.result,
-  });
 
   // Hard gate 3 (VERIFY): the obligation is not closed because KeeperHub says
   // so or because a tx exists — it is closed only after independent on-chain
-  // postcondition verification. EXECUTING -> VERIFYING -> SETTLED (proven) or
-  // FAILED (disputed); a disputed obligation stays alive for retry.
-  transition(policy.policyId, "VERIFYING", "Independent on-chain postcondition verification", {
-    executionId: txResult.executionId,
-    transactionLink: link,
-    sponsored: txResult.sponsored,
+  // postcondition verification (exact Settlement Transfer event). EXECUTING ->
+  // VERIFYING -> SETTLED (proven) or FAILED (disputed, still alive for retry).
+  transition(policyId, "VERIFYING", "Independent on-chain postcondition verification", {
+    executionId: distribution.executionId,
+    sponsored: true,
   });
-  const verification = await verifySettlement(policy.policyId);
+  const verification = await verifySettlement(policyId);
 
   if (verification.verdict !== "PROVEN") {
     transition(
-      policy.policyId,
+      policyId,
       "FAILED",
       `Settlement not proven on chain: ${verification.checks
         .filter((c) => !c.ok)
@@ -540,17 +562,21 @@ async function executeWorkflow(policyId: string): Promise<void> {
     return;
   }
 
-  transition(policy.policyId, "SETTLED", "KeeperHub redemption + independent postcondition verified", {
-    executionId: txResult.executionId,
-    transactionLink: link,
-    sponsored: txResult.sponsored,
-    verification,
+  const proof = recordSettlementProof({
+    policy,
+    settlementTxHash: distribution.txHash,
+    executionId: distribution.executionId,
   });
-  console.log(`\nSETTLED after independent on-chain verification.`);
+  transition(policyId, "SETTLED", "KeeperHub redemption + distribution + independent transfer proof", {
+    executionId: distribution.executionId,
+    verification,
+    proofId: proof.verificationId,
+  });
+  console.log(`\nSETTLED after independent on-chain verification (exact transfer proven).`);
   for (const c of verification.checks) {
     console.log(`  [${c.ok ? "ok" : "!!"}] ${c.name} — ${c.detail}`);
   }
-  console.log(`Ledger: pnpm status | verify: pnpm verify --policy-id=${policy.policyId}`);
+  console.log(`Ledger: pnpm status | verify: pnpm verify --policy-id=${policyId}`);
 }
 
 function requireKeeperHubKeyMessage(): string {
@@ -760,9 +786,11 @@ Commands:
                            arm a policy: compose the redemption workflow, stage it
   status                   show the policy ledger + on-chain resolution per policy
   watch [--interval-ms]    poll until resolution, then prompt to execute
-  execute --policy-id=<id> trigger the staged KeeperHub workflow
-  verify --policy-id=<id>  independently verify settlement on chain: finality -> integrity ->
-                           execution -> postcondition; prints PROVEN/BLOCKED/DISPUTED
+  execute --policy-id=<id> trigger the staged KeeperHub workflow (redemption + USDC
+                           distribution), simulate-then-broadcast each step
+   verify --policy-id=<id>  independently verify settlement on chain: finality -> integrity ->
+                            confirmed distribution tx -> exact ERC20 Transfer event; prints
+                            PROVEN/BLOCKED/DISPUTED
   demo-bootstrap           create a deterministic CTF condition + mint YES shares
   demo-resolve             report the payout (on-chain), transition to RESOLVED
   demo-distribute          redeem + route to treasury, transition to SETTLED

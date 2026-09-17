@@ -182,6 +182,72 @@ function distributeNode(
   };
 }
 
+export type WorkflowExecKind = "contract-call" | "transfer-token";
+
+/** A normalized, executable workflow step extracted from the staged workflow. */
+export interface WorkflowExecStep {
+  nodeId: string;
+  kind: WorkflowExecKind;
+  label: string;
+  network: string;
+  contractAddress?: string;
+  functionName?: string;
+  functionArgs?: unknown[];
+  abi?: string;
+  tokenAddress?: string;
+  recipient?: string;
+  amountUi?: string;
+}
+
+/**
+ * The executable nodes of a staged workflow, in order. The workflow envelope
+ * contains trigger/read/gate nodes for review; only the write nodes
+ * (`web3/write-contract`, `web3/transfer-token`) actually move state. The
+ * execute path runs ALL of them, so a redemption is never closed without the
+ * distribution that discharges the obligation.
+ */
+export function executableSteps(workflow: WorkflowEnvelope | undefined): WorkflowExecStep[] {
+  if (!workflow) return [];
+  const steps: WorkflowExecStep[] = [];
+  for (const node of workflow.nodes) {
+    const cfg = node.data.config as Record<string, unknown>;
+    const actionType = cfg.actionType;
+    if (actionType === "web3/write-contract") {
+      steps.push({
+        nodeId: node.id,
+        kind: "contract-call",
+        label: node.data.label,
+        network: String(cfg.network ?? "137"),
+        contractAddress: String(cfg.contractAddress ?? ""),
+        functionName: String(cfg.abiFunction ?? ""),
+        functionArgs: cfg.functionArgs as unknown[] | undefined,
+        abi: cfg.abi as string | undefined,
+      });
+    } else if (actionType === "web3/transfer-token") {
+      let tokenAddress = USDC;
+      try {
+        const parsed = JSON.parse(String(cfg.tokenConfig ?? "{}")) as {
+          customToken?: { address?: string };
+          address?: string;
+        };
+        tokenAddress = parsed.customToken?.address ?? parsed.address ?? USDC;
+      } catch {
+        tokenAddress = USDC;
+      }
+      steps.push({
+        nodeId: node.id,
+        kind: "transfer-token",
+        label: node.data.label,
+        network: String(cfg.network ?? "137"),
+        tokenAddress,
+        recipient: String(cfg.recipientAddress ?? ""),
+        amountUi: String(cfg.amount ?? "0"),
+      });
+    }
+  }
+  return steps;
+}
+
 export function buildRedemptionWorkflow(
   opts: RedemptionWorkflowOptions
 ): WorkflowEnvelope {

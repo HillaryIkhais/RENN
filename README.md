@@ -12,30 +12,34 @@ and **independently verified after settlement** — not merely transported by
 KeeperHub.
 
 ```
-AGENT PROPOSES
+LIVE EVENT                     (Polymarket condition, on-chain)
     ↓
-RENN DETERMINISTIC GATE   (finality + immutability + exactly-once)
+FINALITY PROOF                 (CTF payoutDenominator > 0 — never a proposal)
     ↓
-KEEPERHUB EXECUTES        (frozen workflow, sponsored gas)
+IMMUTABLE OBLIGATION           (keccak-frozen: beneficiary, face value, workflow)
     ↓
-RENN POSTCONDITION VERIFY (chain re-read: no "KeeperHub says it's done")
+KEEPERHUB REDEEM               (redeemPositions on the CTF, sponsored)
     ↓
-OBLIGATION #1 PROVEN SETTLED
+KEEPERHUB USDC SETTLEMENT      (transfer the obligated USDC to the beneficiary)
     ↓
-SETTLEMENT PROOF BECOMES AUTHORIZATION   (obligation #2 is chained to #1)
+INDEPENDENT EXACT TRANSFER PROOF   (re-read chain: exact ERC20 Transfer event)
     ↓
-KEEPERHUB EXECUTES AGAIN  (obligation #2 stays locked until #1 is PROVEN)
+PROVEN FINANCIAL STATE         (obligation #1 SETTLED + proof persisted)
     ↓
-OBLIGATION #2 PROVEN SETTLED
+PROOF-GATED NEXT OBLIGATION    (obligation #2 references #1's proof; gate 1.5)
+    ↓
+KEEPERHUB EXECUTION            (obligation #2 redeem + settlement, sponsored)
+    ↓
+SECOND PROOF                   (exact Transfer event verified again)
     ↓
 CHAIN CLOSED
 ```
 
 The last loop is the point: a proven settlement is not the end of the story —
 it is **executable state**. Obligation #2's unlock condition is obligation #1's
-independently verified `PROVEN_SETTLED` state, frozen into #2's envelope at arm
-time. Settlement proof stops being a receipt and becomes the authorization for
-the next obligation.
+independently verified `PROVEN_SETTLED` **settlement proof**, frozen into #2's
+envelope at arm time. Settlement proof stops being a receipt and becomes the
+authorization for the next obligation.
 
 **REAL POLYGON PROOF — chain closed.** One live chain, two obligations, six
 sponsored Polygon mainnet transactions from an empty org wallet, executed by
@@ -50,7 +54,7 @@ CHAIN CLOSED — chain-mu59jxk3
     approve  tx 0xf70b1f7961f00dda…fb2decbd2
     redeem   tx 0x65005ee0e187ecf6…daf51adb74   KeeperHub dmr1g67zmpejb6f94i8hp
     route    tx 0x21a05f325036b074…910ac303     KeeperHub kcdpl20ya8ddd315z35jo
-  →  proof verified on chain (FINALITY + INTEGRITY + EXECUTION + POSTCONDITION)
+  →  proof verified on chain (FINALITY + INTEGRITY + EXECUTION + exact TRANSFER)
 
   OBLIGATION #2  policy-3f07ac4b   PROVEN_SETTLED   condition 0x3733a1b6…9b3868
     UNLOCKED BY policy-acb077c5 PROVEN_SETTLED   (gate 1.5, fail-closed)
@@ -118,24 +122,30 @@ remembering, reinterpretating, or approving it later:
 2. LOCK     — hash the envelope; nobody can later change who/what/when.
 3. WAITING  — outcome proposed: SETTLEMENT BLOCKED until payout state is final.
 4. RESOLVED — on-chain finality: CTF payoutDenominator(conditionId) > 0.
-5. EXECUTE  — KeeperHub runs the frozen workflow: redeem + route.
-6. VERIFY   — independent on-chain re-read: finality + integrity + execution + postcondition.
-7. SETTLED  — obligation proven discharged; execution id + tx + verification in the ledger.
-8. CHAIN    — that proof unlocks a chained obligation (dependsOn); it repeats 4-7 and closes.
+5. EXECUTE  — KeeperHub runs EVERY write node: redeem + route (settlement).
+6. VERIFY   — independent chain re-read: finality + integrity + confirmed
+              distribution tx + exact ERC20 Transfer event.
+7. SETTLED  — proof persisted; execution id + tx + verification in the ledger.
+8. CHAIN    — that proof unlocks a chained obligation (dependsOn); it repeats 4-7.
 ```
 
 Each stage is a tracked state in `src/policy/ledger.ts`. Transitions are only
 driven by on-chain evidence. `payoutDenominator` on the Polymarket Conditional
 Tokens contract is the only thing that moves an obligation to EXECUTING; a
-provisional proposal only ever produces `WAITING_FINALITY`. Execution closes as
-`SETTLED` only when `pnpm verify` proves finality, integrity, on-chain execution
-and beneficiary possession — never on KeeperHub's receipt alone.
+provisional proposal only ever produces `WAITING_FINALITY`. The execute path
+runs **all** write nodes in the staged workflow (`redeem` **and** `route`) — a
+redemption without the distribution can never close. Settlement closes as
+`SETTLED` only when `pnpm verify` proves finality, integrity, the confirmed
+distribution transaction, and an **exact** `Transfer(USDC → beneficiary,
+faceValue)` event — never on KeeperHub's receipt alone, and never on a
+"beneficiary balance ≥ face value" heuristic.
 
 The chain stage is enforced by gate 1.5 (`src/policy/chain.ts`): a chained
 obligation cannot execute until its predecessor is independently `PROVEN_SETTLED`
-on chain, and the dependency itself is part of the frozen envelope — re-pointing
-it changes the hash and voids the obligation. `pnpm chain` runs the whole thing
-end to end.
+on chain **and** has a valid persisted settlement proof (`src/policy/proof.ts`)
+that the child references — `state === SETTLED` alone is not enough. The
+dependency itself is part of the frozen envelope, so re-pointing it changes the
+hash and voids the obligation. `pnpm chain` runs the whole thing end to end.
 
 ## Architecture
 
@@ -245,6 +255,7 @@ pnpm execute --policy-id=<policy-id>  # settle only the frozen obligation (final
 pnpm sanity                           # zero-value sponsored execution proof (empty wallet, real tx)
 pnpm prototype --beneficiary=<addr>   # full KeeperHub-executed lifecycle (sponsored)
 pnpm proofs                           # zero-funding gate proofs: immutability + blocked + exactly-once + chain
+pnpm test                             # correctness suite: exact-transfer verify, chain gating, gates, ledger retry
 pnpm verify --policy-id=<id>          # independent on-chain settlement verification (PROVEN/BLOCKED/DISPUTED)
 pnpm zero-value --resolved=<cond> --parent=<parent> [--beneficiary=<addr>]   # Layer-1 proof on a really-resolved condition
 pnpm chain --resolved=<condA> --chain-resolution=<condB> [--beneficiary=<addr>]   # full two-obligation chain -> CHAIN CLOSED
@@ -254,10 +265,12 @@ pnpm site:export                      # static, backend-free dashboard in dist/i
 `execute` refuses two things before it ever broadcasts: a **provisional
 outcome** (`SETTLEMENT BLOCKED` — no irreversible obligation fires off a
 preliminary result) and an **edited obligation** (the recomputed envelope hash
-must equal the hash frozen at arm time). For a real execution it dry-runs the
-redemption (`simulate: true`), requires `success: true` and `wouldRevert:
-false`, broadcasts under a fresh `Idempotency-Key`, and polls to a terminal
-status.
+must equal the hash frozen at arm time). It also re-reads the CTF payout state
+live and, for a chained obligation, requires the predecessor's proof. For a real
+execution it runs **every write step** in the staged workflow — `redeem` then
+`route` — dry-running each (`simulate: true`), requiring `success: true` and
+`wouldRevert: false`, broadcasting under a fresh `Idempotency-Key`, and polling
+to a terminal status. Both execution ids / tx hashes are recorded in the ledger.
 
 `sanity` already landed a real `approve(spender, 0)` on USDC (Base mainnet)
 from an organisation wallet with zero native balance — `executionId
@@ -301,8 +314,16 @@ The `kh_` org key is required for the sponsored execution path (`sanity`,
   payout.
 - **Chain gate (proof as authorization).** A chained obligation fires only
   after its predecessor is independently verified `PROVEN_SETTLED` on chain
-  (gate 1.5, `src/policy/chain.ts`). The dependency is part of the frozen
-  envelope, so it cannot be re-pointed after locking.
+  **and** carries a valid persisted settlement proof the child references
+  (gate 1.5, `src/policy/chain.ts` + `src/policy/proof.ts`). The dependency is
+  part of the frozen envelope, so it cannot be re-pointed after locking.
+- **Exact-transfer verification, not a balance guess.** The VERIFY stage
+  (`src/policy/verify.ts`) parses the distribution receipt and requires an
+  exact `Transfer(USDC → beneficiary, faceValue)` event attributable to that
+  execution. A settled-but-unproven balance can never stand in for proof.
+- **Redemption is not settlement.** The execute path runs every write node in
+  the staged workflow; a redemption without the USDC distribution is recorded
+  as `FAILED` (retryable) and can never become `SETTLED`.
 - **Preflight the write.** Every broadcast is preceded by a live simulation;
   anything that would revert does not get signed.
 - **Append-only ledger.** Every state change and execution hop is appended to a
@@ -366,12 +387,20 @@ nothing is faked.
   mainnet transactions, empty org wallet. Chain `chain-mu59jxk3` reads
   **CLOSED** in `pnpm status` and on the dashboard. Value 0 USDC per leg
   (pending collateral) — the mechanism is proven, the value leg is not claimed.
-- **DONE — independent postcondition verification (`pnpm verify`):** the
+- **DONE — independent verification (`pnpm verify`):** the
   real Layer-1 obligation is re-read from Polygon and proven settled on chain:
-  FINALITY (denom 1) + INTEGRITY (envelope hash intact) + EXECUTION (tx
-  confirmed, KeeperHub `y3729jn0stn1xmdmafg6h`) + POSTCONDITION. Settlement is
-  PROVEN, not assumed; the same VERIFY stage gates every future execution
-  (`EXECUTING → VERIFYING → SETTLED`).
+  FINALITY (denom 1) + INTEGRITY (envelope hash intact) + EXECUTION (confirmed
+  distribution tx, KeeperHub `y3729jn0stn1xmdmafg6h`) + exact TRANSFER event.
+  Settlement is PROVEN, not assumed; the same VERIFY stage gates every future
+  execution (`EXECUTING → VERIFYING → SETTLED`).
+- **DONE — correctness suite (`pnpm test`, 30 tests, no network):** exact
+  `Transfer(USDC → beneficiary, amount)` matching (wrong beneficiary / amount /
+  token all fail); persisted proof integrity (tampered payload rejected);
+  proof-gated chaining (absent / unsettled / unproven predecessor blocks,
+  proven predecessor unlocks); provisional resolution blocks execution; edited
+  obligation hash blocks execution; redemption-without-distribution cannot
+  verify; failed-child retry preserves the same frozen hash; settled obligation
+  cannot execute twice; zero-value verification is kept separate.
 - Evidence path to a filled paper trail:
   1. `pnpm prototype --beneficiary=…` — the full six-hop lifecycle
      (approve/create/split/block/resolve/redeem/route) executed by KeeperHub.

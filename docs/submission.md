@@ -58,8 +58,8 @@ two-step reality of resolution:
 - **RESOLVED** — on-chain finality: `payoutDenominator(conditionId) > 0`.
 - **EXECUTING → VERIFYING → SETTLED** — KeeperHub runs the frozen workflow, and
   only then Renn **independently re-reads the chain** (finality, envelope
-  integrity, confirmed transaction, beneficiary possession) before the
-  obligation closes as **PROVEN SETTLED**. A failed or disputed execution keeps
+  integrity, confirmed distribution transaction, exact ERC20 Transfer event)
+  before the obligation closes as **PROVEN SETTLED**. A failed or disputed execution keeps
   the same frozen obligation alive for retry (`FAILED`, retryable); a settled
   obligation is exactly-once and refuses duplicate payment (`ALREADY SETTLED`).
 - **CHAIN** — the proven settlement is **executable state**: a chained
@@ -70,7 +70,7 @@ two-step reality of resolution:
 
 The invariant that makes this an obligation and not a script:
 **LOCKED OBLIGATION ≠ EDITABLE AGENT INTENT**, **SETTLED ≠ "KeeperHub said
-it's done"** (Renn verifies the postcondition itself), and **PROVEN_SETTLED =
+it's done"** (Renn proves the exact transfer itself), and **PROVEN_SETTLED =
 the authorization for the next obligation**.
 
 ## Why KeeperHub
@@ -109,8 +109,8 @@ the precommitment contract.
        └────────────────┴──────────── RENN obligation ledger (append-only JSONL)
                                         │
                                         ▼
-                              POSTCONDITION VERIFY (src/policy/verify.ts)
-                              finality + integrity + execution + possession
+                              SETTLEMENT VERIFY (src/policy/verify.ts)
+                              finality + integrity + distribution + exact Transfer
                               PROVEN -> SETTLED / FAILED (retry, same obligation)
 ```
 
@@ -121,8 +121,9 @@ the precommitment contract.
 | Redemption | CTF / NegRiskAdapter redemption, ABI-verified against live CTF | `src/polymarket/redemption.ts` |
 | Execution | KeeperHub workflow composer + safe direct-execution client | `src/keeperhub/` |
 | Policy | Append-only state machine (ARMED → … → SETTLED, incl. VERIFYING/FAILED) | `src/policy/` |
-| Postcondition | Independent on-chain verification (`verifySettlement`) — PROVEN/BLOCKED/DISPUTED | `src/policy/verify.ts` |
-| Chain | Gate 1.5: a chained obligation unlocks only on predecessor `PROVEN_SETTLED`; dependency is in the frozen envelope | `src/policy/chain.ts` |
+| Postcondition | Independent on-chain verification (`verifySettlement`) — FINALITY/INTEGRITY/EXECUTION/TRANSFER — PROVEN/BLOCKED/DISPUTED | `src/policy/verify.ts` |
+| Proof | Immutable settlement proof persisted per obligation; child references it | `src/policy/proof.ts` |
+| Chain | Gate 1.5: a chained obligation unlocks only on predecessor `PROVEN_SETTLED` **with a valid proof**; dependency is in the frozen envelope | `src/policy/chain.ts` |
 | Surface | CLI (`arm`, `status`, `watch`, `execute`, `verify`, `chain`, `prototype`, `demo:*`, `sanity`) + live console | `src/index.ts`, `dashboard/` |
 | Demo | Deterministic, real-mainnet CTF condition under Renn's control | `src/polymarket/demo-engine.ts` |
 
@@ -217,12 +218,13 @@ the redemption through the simulate → broadcast → status-poll loop in
      `LOCKED` is refused (`OBLIGATION CHAIN BLOCKED`), and the frozen envelope
      hash changes when the predecessor is re-pointed — so the unlock condition
      cannot be edited after locking.
-- **Independent postcondition verification (`pnpm verify --policy-id=…`):**
+- **Independent settlement verification (`pnpm verify --policy-id=…`):**
   the real Layer-1 obligation is read back from Polygon and **PROVEN settled**:
-  FINALITY (denom 1) + INTEGRITY (envelope intact) + EXECUTION (confirmed tx +
-  KeeperHub `y3729jn0stn1xmdmafg6h`) + POSTCONDITION (beneficiary possession).
-  This is the `VERIFY` stage of the loop: `SETTLED` only when proven on chain,
-  never on KeeperHub's receipt alone.
+  FINALITY (denom 1) + INTEGRITY (envelope intact) + EXECUTION (confirmed
+  distribution tx + KeeperHub `y3729jn0stn1xmdmafg6h`) + exact `Transfer(USDC →
+  beneficiary, faceValue)` event. This is the `VERIFY` stage of the loop:
+  `SETTLED` only when the exact transfer is proven on chain, never on
+  KeeperHub's receipt or a balance heuristic.
 - **Obligation chain, live and CLOSED (`pnpm chain`):** two chained obligations
   executed through KeeperHub on two real finally-resolved conditions, sponsored,
   from the empty org wallet. Obligation #1 `policy-acb077c5` (condition
@@ -288,7 +290,7 @@ fake live execution.
 | Layer-1: `approve(CTF, 0)` (Polygon) | `pnpm zero-value --resolved=…` | **DONE** — `0x1579c791…264a` (sponsored) |
 | Layer-1: `redeemPositions` (real resolved condition, gate OPEN) | `pnpm zero-value --resolved=…` | **DONE** — `0xc7953f32…ff77` (sponsored) |
 | Layer-1: `transfer(0)` to beneficiary | `pnpm zero-value --resolved=…` | **DONE** — `0x2c453a77…f45b1` (sponsored) |
-| Independent postcondition verification | `pnpm verify --policy-id=policy-ca2df166` | **DONE** — PROVEN (finality+integrity+execution+possession) |
+| Independent settlement verification | `pnpm verify --policy-id=policy-ca2df166` | **DONE** — PROVEN (finality+integrity+distribution+exact Transfer) |
 | Obligation chain: #1 PROVEN_SETTLED unlocks #2 (6 sponsored Polygon txs) | `pnpm chain --resolved=<condA> --chain-resolution=<condB>` | **DONE** — chain `chain-mu59jxk3` CLOSED (`policy-acb077c5` → `policy-3f07ac4b`) |
 | Gate proofs (immutability + blocked + exactly-once + chain) | `pnpm proofs` | **DONE** — all four outputs verified (zero-funding) |
 | Prototype: full lifecycle (approve/create/split/block/resolve/redeem/route) | `pnpm prototype` | PENDING (~1 USDC in org wallet) |
@@ -311,8 +313,10 @@ each step runs; nothing requires hand-editing.
   (`ALREADY SETTLED`); a failed/disputed execution stays alive for retry under
   the same frozen hash — retry can discharge the obligation, never mutate it.
 - **Postcondition proof.** Settlement closes as `SETTLED` only after `pnpm
-  verify` re-reads finality, envelope integrity, the confirmed transaction and
-  beneficiary possession directly from Polygon — `PROVEN`, not assumed.
+  verify` re-reads finality, envelope integrity, the confirmed distribution
+  transaction, and an exact ERC20 `Transfer(USDC → beneficiary, faceValue)`
+  event directly from Polygon — `PROVEN`, not assumed. The proof is persisted
+  (`src/policy/proof.ts`) with a tamper-evident id.
 - **Chain gate (proof as authorization).** A chained obligation fires only
   after its predecessor is independently `PROVEN_SETTLED` on chain (gate 1.5);
   the dependency is part of the frozen envelope, so re-pointing it voids the
