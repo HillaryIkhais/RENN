@@ -74,22 +74,22 @@ test("settled predecessor without a valid proof blocks the child", async () => {
     () =>
       assertChainUnlocked("policy-child", {
         getPolicy: (id) => policies.get(id),
-        ensureSettlementProof: () => ({ ok: false, reason: "no proof" }),
+        verifySettlement: async () => ({ policyId: "policy-root", verdict: "PROVEN", checks: [] }),
       }),
-    /no valid settlement proof/
+    /no valid persisted settlement proof/
   );
 });
 
 test("a proven predecessor unlocks the child", async () => {
   const predecessor = fakePolicy({ policyId: "policy-root", state: "SETTLED" });
   const child = fakePolicy({ policyId: "policy-child", state: "LOCKED", dependsOn: "policy-root" });
+  predecessor.proof = proofFor(predecessor);
   const policies = new Map([
     ["policy-child", child],
     ["policy-root", predecessor],
   ]);
   const unlock = await assertChainUnlocked("policy-child", {
     getPolicy: (id) => policies.get(id),
-    ensureSettlementProof: () => ({ ok: true, proof: proofFor(predecessor) }),
     verifySettlement: async () => ({ policyId: "policy-root", verdict: "PROVEN", checks: [] }),
   });
   assert.equal(unlock.predecessorId, "policy-root");
@@ -99,6 +99,7 @@ test("a proven predecessor unlocks the child", async () => {
 test("a proof that does not re-verify on chain blocks the child", async () => {
   const predecessor = fakePolicy({ policyId: "policy-root", state: "SETTLED" });
   const child = fakePolicy({ policyId: "policy-child", state: "LOCKED", dependsOn: "policy-root" });
+  predecessor.proof = proofFor(predecessor);
   const policies = new Map([
     ["policy-child", child],
     ["policy-root", predecessor],
@@ -107,7 +108,6 @@ test("a proof that does not re-verify on chain blocks the child", async () => {
     () =>
       assertChainUnlocked("policy-child", {
         getPolicy: (id) => policies.get(id),
-        ensureSettlementProof: () => ({ ok: true, proof: proofFor(predecessor) }),
         verifySettlement: async () => ({ policyId: "policy-root", verdict: "DISPUTED", checks: [] }),
       }),
     /does not independently verify on chain/

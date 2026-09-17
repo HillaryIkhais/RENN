@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { reload } from "../src/policy/ledger.js";
 import { getResolution, describeResolution } from "../src/polymarket/resolution.js";
 import { runAllAttacks } from "../src/policy/attackmode.js";
+import { liveOrgWalletState } from "../src/policy/wallet.js";
 
 async function build(): Promise<void> {
   const ROOT = join(import.meta.dirname, "..");
@@ -78,10 +79,14 @@ async function build(): Promise<void> {
   // these recorded results are replayed — same engine, same refusals.
   const attackResults = await runAllAttacks({ policies });
 
+  // Measure the org wallet on-chain so the value leg is a measured fact at
+  // export time, not a claim.
+  const orgWallet = await liveOrgWalletState();
+
   const snapshot = {
     at: new Date().toISOString(),
     policiesPayload,
-    evidencePayload: { transactions: txns },
+    evidencePayload: { transactions: txns, orgWallet },
     attacksPayload: { at: new Date().toISOString(), results: attackResults },
   };
 

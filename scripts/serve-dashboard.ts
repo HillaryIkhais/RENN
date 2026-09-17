@@ -4,6 +4,7 @@ import { join, extname } from "node:path";
 import { reload } from "../src/policy/ledger.js";
 import { getResolution, describeResolution } from "../src/polymarket/resolution.js";
 import { runAttack, runAllAttacks, ATTACK_IDS } from "../src/policy/attackmode.js";
+import { liveOrgWalletState } from "../src/policy/wallet.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const ROOT = join(import.meta.dirname, "..", "dashboard");
@@ -107,8 +108,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/evidence") {
       const txns = await liveEvidence();
+      const orgWallet = await liveOrgWalletState();
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ at: new Date().toISOString(), transactions: txns }, null, 2));
+      res.end(JSON.stringify({ at: new Date().toISOString(), transactions: txns, orgWallet }, null, 2));
       return;
     }
     if (url.pathname === "/attack") {

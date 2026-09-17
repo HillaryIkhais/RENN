@@ -91,13 +91,24 @@ test("RE-POINT DEPENDENCY is blocked by GATE 1 (envelope includes dependsOn)", a
 test("TAMPER PROOF is blocked by GATE 1.5", async () => {
   const result = await runAttack("tamper-proof", { policies, verifyDeps: mockVerifyDeps });
   assert.equal(result.blocked, true);
+  assert.equal(result.headline, "PROOF INTEGRITY FAILED");
   assert.ok(result.detail.includes("OBLIGATION CHAIN BLOCKED"));
-  assert.ok(result.detail.includes("no valid settlement proof"));
+  assert.ok(result.detail.includes("no valid persisted settlement proof"));
+});
+
+test("DELETE PROOF is blocked by GATE 1.5 (predecessor not proven)", async () => {
+  const result = await runAttack("delete-proof", { policies, verifyDeps: mockVerifyDeps });
+  assert.equal(result.blocked, true);
+  assert.equal(result.headline, "PREDECESSOR NOT PROVEN");
+  assert.ok(result.detail.includes("OBLIGATION CHAIN BLOCKED"));
+  assert.ok(result.detail.includes("no settlement proof persisted"));
+  assert.ok(result.observed?.toLowerCase().includes("deleted"));
 });
 
 test("EXECUTE EARLY is blocked by GATE 1.5 (predecessor not settled)", async () => {
   const result = await runAttack("execute-early", { policies, verifyDeps: mockVerifyDeps });
   assert.equal(result.blocked, true);
+  assert.equal(result.headline, "DEPENDENCY NOT SETTLED");
   assert.ok(result.detail.includes("OBLIGATION CHAIN BLOCKED"));
   assert.ok(result.detail.includes("LOCKED"));
 });
@@ -105,13 +116,14 @@ test("EXECUTE EARLY is blocked by GATE 1.5 (predecessor not settled)", async () 
 test("EXECUTE SETTLED is blocked by GATE 0 (exactly-once)", async () => {
   const result = await runAttack("execute-settled", { policies, verifyDeps: mockVerifyDeps });
   assert.equal(result.blocked, true);
+  assert.equal(result.headline, "ALREADY SETTLED");
   assert.ok(result.detail.includes("ALREADY SETTLED"));
 });
 
 test("CLAIM SETTLEMENT is rejected — proof amount 0 ≠ claimed 1", async () => {
   const result = await runAttack("claim-settlement", { policies, verifyDeps: mockVerifyDeps });
   assert.equal(result.blocked, true);
-  assert.ok(result.headline.includes("CLAIM REJECTED"));
+  assert.equal(result.headline, "NO VERIFIED TRANSFER");
   assert.ok(result.detail.includes("proof amount 0 != obligated 1"));
   assert.ok(result.detail.includes("zero-value obligation"));
 });

@@ -1,6 +1,6 @@
 import { getPolicy } from "./ledger.js";
 import { verifySettlement, type SettlementVerification } from "./verify.js";
-import { ensureSettlementProof } from "./proof.js";
+import { validateSettlementProof } from "./proof.js";
 import type { Policy, SettlementProof } from "./types.js";
 
 export interface ChainUnlock {
@@ -12,13 +12,11 @@ export interface ChainUnlock {
 export interface ChainDeps {
   getPolicy: (policyId: string) => Policy | undefined;
   verifySettlement: (policyId: string) => Promise<SettlementVerification>;
-  ensureSettlementProof: (policy: Policy) => { ok: boolean; proof?: SettlementProof; reason?: string };
 }
 
 const defaultDeps: ChainDeps = {
   getPolicy,
   verifySettlement: (policyId) => verifySettlement(policyId),
-  ensureSettlementProof,
 };
 
 /**
@@ -26,8 +24,10 @@ const defaultDeps: ChainDeps = {
  *
  * An obligation whose envelope includes `dependsOn` can only fire after the
  * predecessor obligation has been independently verified as PROVEN_SETTLED.
- * The child references the predecessor's persisted settlement PROOF — not
- * merely `state === SETTLED` — and the proof is re-validated against the frozen
+ * The child references the predecessor's persisted settlement PROOF object —
+ * not merely `state === SETTLED`. The proof must exist as a persisted,
+ * validated record; a settled predecessor with a missing or tampered proof
+ * leaves the child locked, and the proof is re-validated against the frozen
  * obligation and on-chain state before the gate opens.
  *
  * Fail-closed: missing predecessor, unsettled predecessor, missing/tampered
@@ -63,14 +63,19 @@ export async function assertChainUnlocked(
     );
   }
 
-  // The predecessor is SETTLED — require a valid persisted PROOF object (the
+  // The predecessor is SETTLED — require a valid PERSISTED proof object (the
   // authorization the child references). `state === SETTLED` alone is not
-  // enough: a settled obligation with no proof metadata cannot unlock a child.
-  const proofResult = d.ensureSettlementProof(predecessor);
-  if (!proofResult.ok || !proofResult.proof) {
+  // enough, and a missing/tampered proof cannot be reconstructed on the fly:
+  // a chained obligation depends on the settlement proof itself, so deleting
+  // or altering it breaks the chain. Proof is load-bearing.
+  const proof = predecessor.proof;
+  const validated = proof
+    ? validateSettlementProof(proof, predecessor)
+    : { ok: false, reason: "no settlement proof persisted" };
+  if (!proof || !validated.ok) {
     throw new Error(
       `OBLIGATION CHAIN BLOCKED: predecessor ${predecessorId} is SETTLED but has ` +
-        `no valid settlement proof (${proofResult.reason ?? "unknown"}). ` +
+        `no valid persisted settlement proof (${validated.reason ?? "unknown"}). ` +
         `Obligation ${policyId} stays locked until a PROVEN proof is persisted.`
     );
   }
@@ -90,7 +95,7 @@ export async function assertChainUnlocked(
     );
   }
 
-  return { predecessorId, predecessorProof: "PROVEN_SETTLED", proof: proofResult.proof };
+  return { predecessorId, predecessorProof: "PROVEN_SETTLED", proof };
 }
 
 /**

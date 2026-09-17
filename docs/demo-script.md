@@ -1,139 +1,190 @@
-# Renn — demo video script (3 minutes)
+# Renn — demo video script (3 minutes, locked sequence)
 
-Shot: screen capture, 1920x1080, dark terminal plus the Renn dashboard beside
-it. Real transactions are real (hashes linked); what has not happened is
-labelled PENDING — the video never pretends a hash exists.
+Shot: screen capture, 1920x1080, dark. The Renn dashboard is the stage; the
+terminal is the evidence. Real transactions are real (hashes linked); what has
+not happened is labelled PENDING — the video never pretends a hash exists.
+
+The video opens with the **product problem**, not the architecture. Machinery
+(cli, gate code, workflow JSON) appears only as proof that the UI is not
+theater.
+
+## The locked sequence
+
+```
+OPEN        — black screen, the question
+RENN        — one sentence: settlement is the authorization condition
+POLYMARKET  — EVENT FINAL → OBLIGATION #1 LOCKED → KEEPERHUB EXECUTING
+              → ON-CHAIN TRANSFER CONFIRMED → PROVEN SETTLED ✓
+              → OBLIGATION #2 UNLOCKED BY PROOF #1 → executes → CHAIN CLOSED
+ATTACK      — five attacks, five refusals
+EVIDENCE    — the real sponsored hashes + proof object #001
+VALUE LEG   — zero-USDC honesty + measured wallet + the one funded command
+OUTRO       — "Remove proof of settlement, and the next payment cannot happen."
+```
 
 ## Evidence gates (must be true before the respective segment is real)
 
 | Segment | Requires | Marks |
 |---------|----------|-------|
-| 1 (arm / finality / block) | nothing (verified live) | real states, reads, workflow JSON, WAITING_FINALITY / SETTLEMENT BLOCKED cards |
-| 2 (failure proofs) | nothing (verified) | `pnpm proofs` — immutability + blocked-execution + exactly-once + chain outputs |
-| 3 (KeeperHub execution + verify) | `kh_` org key (present) | three real sponsored Polygon hashes + `pnpm verify` PROVEN |
-| 4 (obligation chain) | `kh_` org key (present) | `pnpm chain` — six sponsored Polygon hashes, chain `CLOSED`, #2 unlocked by #1 PROVEN_SETTLED |
-| 5 (live value settlement) | ~1 USDC in org wallet `0x9f7d…e6fc` | NOT YET — shown as an honest pending card |
+| OPEN / thesis / chain replay | nothing (dashboard renders the recorded chain) | real two-card unlock animation + proof object #001 |
+| Attack mode | nothing (engine's own refusals) | dashboard ATTACK THIS OBLIGATION, all BLOCKED |
+| `pnpm proofs` | nothing (verified) | immutability + blocked-execution + exactly-once + chain outputs |
+| Real execution | `kh_` org key (present) | six sponsored Polygon hashes + `pnpm verify` PROVEN, chain `CLOSED` |
+| Value leg | ~1 USDC in org wallet `0x9f7d…e6fc` | measured on-chain in the dashboard. 0 USDC today → honest PENDING card |
 
 If a segment's prerequisite is missing, say so in the video and stop — no
 placeholders dressed as receipts.
 
-## Take 1 — Lock the obligation and show the gate (0:00–0:50)
+## Open — black screen, the question (0:00–0:25)
 
 ```
-pnpm arm --market=2252243 --treasury=<beneficiary> --face=1
-pnpm status
+WHAT IF THE NEXT PAYMENT COULD NOT HAPPEN
+UNTIL THE LAST ONE WAS PROVEN?
 ```
 
-[The Fed's September 2026 decision — a $48M market, now finally resolved on
-chain (denominator 1, YES wins). Renn does not settle on a proposal. I
-precommit: this condition, this beneficiary, this amount, this exact KeeperHub
-workflow — hashed and frozen before anything fires. LOCKED OBLIGATION ≠
-EDITABLE AGENT INTENT.]
+Beat. Cut to dark, one line:
 
-On screen: the policy shows the on-chain read `YES wins (denom 1)`. To show
-the gate, rewind to the provisional story: a freshly armed obligation whose
-condition has no final payout state reads as **WAITING_FINALITY / SETTLEMENT
-BLOCKED** on the dashboard — stage 03, red marker. Line on screen: **Finality
-gate is the product: no irreversible transaction fires off a provisional
-result.**
-
-## Take 2 — Prove the gate with code, not screenshots (0:50–1:20)
+> "Who gives the second payment permission to execute?"
 
 ```
-pnpm proofs
+Payment succeeded.
 ```
 
-[The dashboard is a UI; the guarantee lives in code. Four proofs, run live
-from the same modules the product uses:]
+Beat.
 
-1. **Obligation immutability** — tampering beneficiary, face value, or
-   condition after locking produces a different envelope hash, so the execute
-   path throws `LOCKED OBLIGATION MISMATCH`. Nothing can be quietly changed
-   after the freeze.
-2. **Finality gate** — a policy in WAITING_FINALITY is refused by the execute
-   path: `SETTLEMENT BLOCKED … No irreversible obligation fires on a
-   preliminary result`.
-3. **Exactly-once** — a settled obligation refuses a duplicate payment:
-   `ALREADY SETTLED`. Settlement consumes the execution authority; a failed
-   execution stays alive under the same frozen hash and can only discharge the
-   obligation, never mint a new payout.
-4. **Obligation chain** — a chained obligation whose predecessor is only
-   `LOCKED` is refused: `OBLIGATION CHAIN BLOCKED`. Re-pointing the predecessor
-   changes the frozen envelope hash. Settlement proof is executable state, and
-   the unlock condition cannot be edited after locking.
+> "Did it actually settle?"
 
-Run from a scratch ledger (`.data/proofs/`), zero funding, real code paths.
+RENN, big, on the black:
 
-## Take 3 — KeeperHub discharged a real obligation, and Renn proved it (1:20–2:20)
+> **RENN — the next payment only unlocks when the previous settlement is proven.**
 
-[To prove the loop against the actual Polymarket CTF contract without waiting
-on a vote, Renn armed a finally-resolved condition and let KeeperHub run the
-whole lifecycle from the organisation's wallet — sponsored, no local signing.]
+Line: **Settlement is not a receipt. It is permission.**
 
-```
-pnpm zero-value --resolved=0x0c481aa6…4e4eae0 --parent=0x0000…0000 --beneficiary=0x0716…
-pnpm verify --policy-id=policy-ca2df166
-```
+On screen (dashboard, `#unlock` section). Two obligation cards with the lit
+connector between them. Say it plainly:
 
-Dashboard: the **LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE** strip lists
-the real sponsored executions (`.data/zero-value.jsonl`, all PolygonScan
-verified):
+> "A transaction receipt is not enough. A successful execution is not enough.
+> Renn independently verifies the actual on-chain settlement **before** allowing
+> the dependent obligation to execute."
 
-1. `approve(CTF, 0)` — executionId `dblyr1n2ahek4iegwi96b`, tx `0x1579c791…64a`
-2. `redeemPositions` on the real condition — executionId `a9o7uh3k9mth5mhnmeoay`, tx `0xc7953f32…ff77`
-3. routing value to beneficiary — executionId `y3729jn0stn1xmdmafg6h`, tx `0x2c453a77…45f1`
+> "This transaction became possible *because this proof exists.* Not 'here are
+> two transactions' — the second payment is authorized by the first settlement's
+> proof."
 
-[That redeemPositions call is not a mock — it exercised the real Polymarket
-CTF contract at `0x4D97…6045`. But the important part is the next command:
-`pnpm verify` does not trust "the tx exists" or "KeeperHub said completed". It
-re-reads Polygon itself: finality (denom 1 on chain), envelope integrity,
-confirmed distribution transaction, exact ERC20 Transfer event. **OBLIGATION
-PROVEN SETTLED.**]
+Hit the **proof object #001** panel and read it as an object, not a log:
 
-## Take 4 — The obligation chain: a proven settlement becomes the next authorization (2:20–2:50)
+> "This isn't a status flag. It is an object - a frozen settlement record - that
+> obligation #2 references as its unlock condition. **UNLOCKS → OBLIGATION
+> #002.**"
 
-[The strongest artifact: a settlement proof that is executable state. Two
-obligations, one chain. Obligation #2 is frozen *in advance* with a dependency
-on #1 — so it can only fire once #1's settlement is independently PROVEN.]
+## The live example — Polymarket, the real recorded chain (0:25–1:10)
+
+One giant flow (dashboard hero):
 
 ```
-pnpm chain --resolved=0x0c481aa6…4e4eae0 --chain-resolution=0x3733a1b6…b3868 --beneficiary=0x0716…
-pnpm status
+POLYMARKET EVENT
+  ↓  FINAL (on-chain payout state)
+OBLIGATION #1   $1 USDC → Beneficiary A   LOCKED
+  ↓  KEEPERHUB EXECUTING (redeem + route, sponsored)
+ON-CHAIN TRANSFER CONFIRMED
+  ↓  RENN re-reads Polygon itself
+PROVEN SETTLED ✓
+  ↓  proof persists
+OBLIGATION #2   UNLOCKED BY PROOF #1
+  ↓  executes
+CHAIN CLOSED
 ```
 
-[Watch the line `[chain] OBLIGATION UNLOCKED by policy-acb077c5 (PROVEN_SETTLED)`
-— gate 1.5 re-verifies #1 on chain before #2 is allowed to execute. Six
-sponsored Polygon mainnet transactions, empty org wallet:]
+Voice:
 
-- #1 `policy-acb077c5` PROVEN_SETTLED — approve `0xf70b1f79…`, redeem `0x65005ee0…` (`dmr1g67zmpejb6f94i8hp`), route `0x21a05f32…` (`kcdpl20ya8ddd315z35jo`)
-- #2 `policy-3f07ac4b` PROVEN_SETTLED — approve `0x29e3824c…`, redeem `0x6588bfc4…` (`kgnq0yepac4wiksc6wcf2`), route `0xb76fbaa7…` (`a56nmmxi3ib9hzgydfwgk`)
+> "This is the real, recorded chain: two obligations, one event already final
+> on the Polymarket CTF. KeeperHub executes. Renn does not trust the receipt —
+> it re-reads the chain, verifies the exact USDC transfer to the exact
+> beneficiary, and only then persists the proof. And that proof is what unlocks
+> obligation #2."
 
-`pnpm status` and the dashboard chain card read **CHAIN CLOSED —
-chain-mu59jxk3**. This is the difference between a good integration and a
-system: the first settlement's proof is the second obligation's authorization.
+On the terminal, only the receipts that make the claim immovable:
 
-## Take 5 — The live value leg (2:50–3:10)
+```
+pnpm status    → chain chain-mu59jxk3 CLOSED
+pnpm verify    → PROVEN: FINALITY + INTEGRITY + EXECUTION + exact TRANSFER
+```
 
-[Nothing in the demo so far moved real value — every leg settled zero USDC.
-Funding the executing wallet with value is the last leg, and it is honest and
-open:] screen card reads **NONZERO SETTLEMENT — PENDING COLLATERAL: pending ~1
-USDC collateral** — the exact, smallest sponsored/demo allocation requested
-from KeeperHub. The mechanism, the chain, the hashes, and the dashboard all
-exist now; the value leg lands when the wallet holds the asset.
+## Attack it — the engine refuses (1:10–2:00)
 
-## Outro (3:10–3:20)
+`#attack` section: **ATTACK THIS OBLIGATION.** Click each attack. The red
+`BLOCKED` is the engine's own refusal — same `gates.ts` / `chain.ts` /
+`proof.ts` / `verify.ts` the execute path runs. No mock, no second source of truth.
 
-[What is an obligation against an uncertain outcome, worth today? It is
-something you can lock before the event and enforce after finality. Prediction
-is probabilistic; settlement isn't. Repo and docs are linked below.]
+1. **CHANGE BENEFICIARY** → `BLOCKED — ENVELOPE MISMATCH`
+2. **CHANGE AMOUNT** → `BLOCKED — ENVELOPE MISMATCH`
+3. **DELETE SETTLEMENT PROOF** → `BLOCKED — PREDECESSOR NOT PROVEN`
+4. **EXECUTE OBLIGATION #2 EARLY** → `BLOCKED — DEPENDENCY NOT SETTLED`
+5. **CLAIM PAYMENT #1 SUCCEEDED** → `BLOCKED — NO VERIFIED TRANSFER`
+
+Under the last one, hold the shot and say the two distinctions the product
+runs on:
+
+> "Execution is not settlement." — a confirmed transaction is just a broadcast.
+> "And settlement is not proven settlement." — Renn re-verifies on chain what
+> actually moved, to whom, at exactly what amount.
+
+Pause the demo; show `pnpm proofs` in the terminal (gate guarantees in code,
+same modules the product uses — immutability, finality gate, exactly-once,
+chain gate). Line:
+
+> "The dashboard is a UI. The guarantee lives in code — and we just attacked it
+> with the product's own gate functions. Every one held."
+
+## The real chain — six sponsored Polygon transactions (2:00–2:35)
+
+`#proof` section — LIVE MAINNET EXECUTION PROOF. List the real recorded
+KeeperHub executions (all `sponsored:true`, all PolygonScan-backed):
+
+- #1 `policy-acb077c5` PROVEN_SETTLED — approve `0xf70b1f79…`, redeem `0x65005ee0…` (`dmr1g67…`), route `0x21a05f32…` (`kcdpl20…`)
+- #2 `policy-3f07ac4b` PROVEN_SETTLED — approve `0x29e3824c…`, redeem `0x6588bfc4…` (`kgnq0yep…`), route `0xb76fbaa7…` (`a56nmmxi…`)
+
+Voice:
+
+> "Two obligations, one chain, and obligation #2 executed only because #1 was
+> independently proven settled on chain — the unlock condition is the persisted
+> proof, not a status flag. This is a settlement proof that became executable
+> state."
+
+## The value leg — honest, measured, pending (2:35–2:55)
+
+Dashboard card reads **ZERO ASSET VALUE / NONZERO PENDING**, now backed by the
+**measured** org-wallet balance (read on Polygon at demo time, shown on screen):
+
+> "Every transaction above is real and gas-sponsored, but settles zero USDC —
+> the wallet measured **0 USDC** on-chain today. We do not claim a value leg we
+> have not run. Everything above exists now; the value leg closes with one
+> command the moment the org wallet holds ~1 USDC:"
+
+```
+pnpm chain --resolved=<finalized A> --chain-resolution=<finalized B> --beneficiary=0x0716… --face=1
+```
+
+> "That same chained path then moves face value — 1 USDC → verified transfer →
+> proof persisted → obligation #2 unlocks → second real settlement → chain
+> closed. Until then: mechanism proven, value leg PENDING — not faked."
+
+## Outro (2:55–3:05)
+
+Black screen, one line:
+
+> **Remove proof of settlement, and the next payment cannot happen.**
+
+That is the product. Repo and docs linked; `README.md` has the full
+architecture and the exact evidence list.
 
 ## Failure fallbacks
 
-- No USDC in org wallet yet (the current state): film Takes 1–2 fully, Take 3
-  from the real on-chain hashes, and end on the pending-value card (Take 4 as
-  the honest status).
-- No `kh_` key: show `pnpm proofs` (no network) then the simulate-then-abort
-  path with redemption calldata only.
+- No USDC in org wallet yet (current state): film everything except the value
+  leg; the measured-0-USDC card is itself the outro beat.
+- No `kh_` key: show `pnpm proofs` (no network), the two-card chain replay, and
+  attack mode live; present the recorded six hashes from the ledger without
+  pretending they happened live.
 - Dashboard evidence strip empty: failure of the integration is shown, not
   hidden, then cut.
 
@@ -145,10 +196,10 @@ is probabilistic; settlement isn't. Repo and docs are linked below.]
 
 ## Evidence checklist (final insertion pass)
 
-1. [x] Three real sponsored Polygon hashes from the Layer-1 proof
-2. [x] `pnpm proofs` outputs (immutability + blocked + exactly-once + chain) — scratch-ledger run
-3. [x] `pnpm verify` output (PROVEN: finality + integrity + distribution + exact Transfer)
-4. [x] `sanity` sponsored Base hash — `0xd92588006e35…511c6d` (approve 0, sponsored)
-5. [x] `pnpm chain` output — chain `chain-mu59jxk3` CLOSED, six sponsored Polygon hashes, #2 unlocked by #1 PROVEN_SETTLED
-6. [ ] Dashboard screenshots with the LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE strip + OBLIGATION CHAIN — CHAIN CLOSED + NONZERO SETTLEMENT — PENDING COLLATERAL card
-7. [ ] Once funded: ONE more Polygon run with real USDC + receipt (completes Take 5)
+1. [x] Dashboard hero flow — EVENT FINAL → OBLIGATION LOCKED → KEEPERHUB → VERIFIED → PROVEN → NEXT UNLOCKED
+2. [x] Two-card proof→unlock chain replay + **proof object #001** panel
+3. [x] Attack mode: CHANGE BENEFICIARY / CHANGE AMOUNT / DELETE SETTLEMENT PROOF / EXECUTE #2 EARLY / CLAIM PAYMENT #1 SUCCEEDED — all BLOCKED by the engine
+4. [x] Six sponsored Polygon hashes (chain `chain-mu59jxk3` CLOSED) + `pnpm verify` PROVEN
+5. [x] `pnpm proofs` outputs (immutability + blocked + exactly-once + chain) — scratch-ledger run
+6. [ ] Screenshot the dashboard with the measured on-chain wallet line (0 USDC → VALUE LEG PENDING COLLATERAL)
+7. [ ] Once funded: ONE more Polygon run with real USDC + receipt (completes the value leg)

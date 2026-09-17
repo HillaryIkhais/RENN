@@ -20,6 +20,8 @@ NEXT PAYMENT
 > A successful execution is not enough.
 > RENN independently verifies the actual on-chain settlement before allowing the dependent obligation to execute.
 
+**Remove proof of settlement, and the next payment cannot happen.**
+
 ---
 
 **Renn — deterministic settlement gates for agentic onchain execution.**
@@ -93,7 +95,10 @@ sponsored on Polygon mainnet, but moves **zero USDC** — so the *mechanism*
 value settlement needs ~1 USDC in the org wallet
 `0x9f7de2b79d93adb3d3ef6501ca6d8c8c00a2e6fc` (gas sponsored); the identical
 chained path then moves face value. Until then the submission claims only what
-is proven and marks the rest PENDING.
+is proven and marks the rest PENDING. **Measured on-chain at demo time
+(`pnpm site:export` bakes this in): 0.00 USDC / 0 POL in the org wallet** —
+the dashboard renders the live-measured balance in the ZERO ASSET VALUE strip,
+so "0 USDC" is a measured fact, not a claim.
 
 Part of the KeeperHub "Agent Economy" Hackathon (main track) and the Arc
 Testnet chain-registration bounty (issue #2230, PR merged alongside).
@@ -397,9 +402,14 @@ nothing is faked.
   duplicate execution (`ALREADY SETTLED`); (4) obligation chain — a chained
   obligation whose predecessor is only `LOCKED` is refused
   (`OBLIGATION CHAIN BLOCKED`), and re-pointing the predecessor changes the
-  frozen envelope hash. The FOMC market is now **finally resolved on-chain
-  (denom 1)**, so the same finality gate demonstrably *opens* for the real
-  conditional payment.
+  frozen envelope hash. The dashboard's Attack Mode pushes the same code
+  harder — CHANGE BENEFICIARY / CHANGE AMOUNT refusals, TAMPER and **DELETE of
+  the persisted settlement proof (`BLOCKED — PREDECESSOR NOT PROVEN`)**, EXECUTE
+  OBLIGATION #2 EARLY (`BLOCKED — DEPENDENCY NOT SETTLED`), EXECUTE SETTLED
+  AGAIN, and the central distinction CLAIM PAYMENT #1 SUCCEEDED
+  (`BLOCKED — NO VERIFIED TRANSFER`). The FOMC market is now **finally resolved
+  on-chain (denom 1)**, so the same finality gate demonstrably *opens* for the
+  real conditional payment.
 - **DONE — obligation chain, live and CLOSED (`pnpm chain`):** two chained
   obligations executed through KeeperHub on two real finally-resolved
   conditions. Obligation #1 `policy-acb077c5` settled and was independently

@@ -26,6 +26,7 @@ export const ATTACK_IDS = [
   "change-condition",
   "repoint-dependency",
   "tamper-proof",
+  "delete-proof",
   "execute-early",
   "execute-settled",
   "claim-settlement",
@@ -60,6 +61,7 @@ const ATTACK_TITLES: Record<AttackId, string> = {
   "change-condition": "Change the condition after lock",
   "repoint-dependency": "Re-point obligation #2's dependency",
   "tamper-proof": "Tamper with the settlement proof",
+  "delete-proof": "Delete the settlement proof",
   "execute-early": "Execute obligation #2 before its dependency settles",
   "execute-settled": "Execute a settled obligation again",
   "claim-settlement": "Claim payment #1 succeeded",
@@ -71,6 +73,7 @@ const GATES: Record<AttackId, string> = {
   "change-condition": "GATE 1 — OBLIGATION IMMUTABILITY",
   "repoint-dependency": "GATE 1 — OBLIGATION IMMUTABILITY (envelope includes dependsOn)",
   "tamper-proof": "GATE 1.5 — CHAIN PROOF VALIDATION",
+  "delete-proof": "GATE 1.5 — CHAIN PROOF VALIDATION",
   "execute-early": "GATE 1.5 — CHAIN UNLOCK",
   "execute-settled": "GATE 0 — EXACTLY-ONCE",
   "claim-settlement": "PROOF GATE — SETTLEMENT VERIFICATION",
@@ -98,8 +101,21 @@ function envelopeOf(p: Policy): string {
   });
 }
 
+/** Short headline shown after the big BLOCKED banner ("BLOCKED — <this>"). */
+const BLOCKED_HEADLINES: Record<AttackId, string> = {
+  "change-beneficiary": "ENVELOPE MISMATCH",
+  "change-amount": "ENVELOPE MISMATCH",
+  "change-condition": "ENVELOPE MISMATCH",
+  "repoint-dependency": "ENVELOPE MISMATCH",
+  "tamper-proof": "PROOF INTEGRITY FAILED",
+  "delete-proof": "PREDECESSOR NOT PROVEN",
+  "execute-early": "DEPENDENCY NOT SETTLED",
+  "execute-settled": "ALREADY SETTLED",
+  "claim-settlement": "NO VERIFIED TRANSFER",
+};
+
 function ok(id: AttackId, target: Policy, detail: string, steps: string[]): AttackResult {
-  return { attack: id, title: ATTACK_TITLES[id], target: target.policyId, blocked: false, gate: GATES[id], headline: "NOT BLOCKED", detail, steps };
+  return { attack: id, title: ATTACK_TITLES[id], target: target.policyId, blocked: false, gate: GATES[id], headline: "UNLOCKED — REQUIRES REVIEW", detail, steps };
 }
 
 function refused(
@@ -114,7 +130,7 @@ function refused(
     target: target.policyId,
     blocked: true,
     gate: GATES[id],
-    headline: "BLOCKED",
+    headline: BLOCKED_HEADLINES[id],
     detail: err instanceof Error ? err.message : String(err),
     steps: [],
     ...extra,
@@ -200,6 +216,32 @@ export async function runAttack(attack: AttackId, opts: AttackOpts): Promise<Att
       ]);
     }
 
+    case "delete-proof": {
+      const realProof = root.proof;
+      if (!realProof) throw new Error("root obligation has no persisted proof to delete");
+      try {
+        await assertChainUnlocked(child.policyId, {
+          getPolicy: (id) =>
+            id === root.policyId ? { ...root, proof: undefined } : opts.policies.find((p) => p.policyId === id),
+        });
+      } catch (err) {
+        return refused(attack, child, err, {
+          expected: `${root.policyId} valid persisted settlement proof ${realProof.verificationId.slice(0, 18)}…`,
+          observed: `${root.policyId} proof object DELETED — ${child.policyId} has nothing to reference`,
+          steps: [
+            `Attacker deletes the persisted settlement proof of ${root.policyId}`,
+            `Gate 1.5 re-checks the object the child references`,
+            `proof gate: no settlement proof persisted`,
+            `BLOCKED — PREDECESSOR NOT PROVEN — ${child.policyId} stays locked`,
+          ],
+        });
+      }
+      return ok(attack, child, "deleted proof unlocked the chain (unexpected)", [
+        `Attacker deletes the persisted proof`,
+        `Chain gate opened (this must never happen)`,
+      ]);
+    }
+
     case "execute-early": {
       try {
         await assertChainUnlocked(child.policyId, {
@@ -266,7 +308,7 @@ export async function runAttack(attack: AttackId, opts: AttackOpts): Promise<Att
         `Claim also edits the frozen obligation (face ${claimed} USDC): ${integrity}`,
         `On-chain verification: ${transfer?.detail ?? verification.verdict}`,
         blocked
-          ? `CLAIM REJECTED — SETTLEMENT HAS NOT BEEN PROVEN; ${child.policyId} stays locked`
+          ? `BLOCKED — NO VERIFIED TRANSFER; ${child.policyId} stays locked`
           : `claim accepted (the recorded settlement verified on chain)`,
       ];
       return {
@@ -275,7 +317,7 @@ export async function runAttack(attack: AttackId, opts: AttackOpts): Promise<Att
         target: root.policyId,
         blocked,
         gate: GATES["claim-settlement"],
-        headline: blocked ? "CLAIM REJECTED — SETTLEMENT HAS NOT BEEN PROVEN" : "CLAIM VERIFIED",
+        headline: blocked ? "NO VERIFIED TRANSFER" : "CLAIM VERIFIED",
         detail: [
           proofCheck.ok ? "proof matches the claimed obligation" : `proof gate: ${proofCheck.reason}`,
           transfer?.detail ?? verification.verdict,
