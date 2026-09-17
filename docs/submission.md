@@ -193,7 +193,7 @@ the redemption through the simulate → broadcast → status-poll loop in
   KeeperHub at a real finally-resolved condition — no self-created condition,
   no collateral needed.
 - **Gate proofs (zero-funding, scratch ledger, real code paths):** `pnpm proofs`
-  demonstrates both hard guarantees live:
+  demonstrates three hard guarantees live:
   1. **Obligation immutability** — tampering the beneficiary, face value, or
      condition after locking yields a different envelope hash (keccak256), and
      the execute path refuses with `LOCKED OBLIGATION MISMATCH`.
@@ -202,12 +202,23 @@ the redemption through the simulate → broadcast → status-poll loop in
      preliminary result`. The FOMC market is confirmed **finally resolved on
      chain (denom 1, YES wins)**, so the same gate demonstrably *opens* for a
      real conditional payment once the world resolves.
+  3. **Exactly-once** — a `SETTLED` obligation refuses duplicate execution:
+     `ALREADY SETTLED`. Execution authority is consumed by settlement; a
+     failed execution (`FAILED`, retryable) resumes the same frozen obligation
+     and can never mint a different payout.
+- **Independent postcondition verification (`pnpm verify --policy-id=…`):**
+  the real Layer-1 obligation is read back from Polygon and **PROVEN settled**:
+  FINALITY (denom 1) + INTEGRITY (envelope intact) + EXECUTION (confirmed tx +
+  KeeperHub `y3729jn0stn1xmdmafg6h`) + POSTCONDITION (beneficiary possession).
+  This is the `VERIFY` stage of the loop: `SETTLED` only when proven on chain,
+  never on KeeperHub's receipt alone.
 
 **PENDING — requires ~1 USDC in the org wallet on Polygon (sponsored gas):**
-- `pnpm prototype --beneficiary=…` — the full six-hop KeeperHub-executed
-  lifecycle above. This is the transaction evidence the rubric asks for; every
-  hop lands a real hash into the evidence table below. The dashboard renders
-  the **LIVE VALUE SETTLEMENT: pending ~1 USDC collateral** card until then.
+- `pnpm prototype --beneficiary=…` — the full lifecycle executed by KeeperHub
+  (approve → condition → split → WAITING FINALITY blocked → resolve → redeem →
+  route). This is the transaction evidence the rubric asks for; every hop lands
+  a real hash into the evidence table below. The dashboard renders the
+  **NONZERO SETTLEMENT — PENDING COLLATERAL** card until then.
 
 **Note — FOMC is now finally resolved on-chain** (denom 1, YES wins); the
 safety property is no longer "blocked on a provisional number" for that
@@ -237,9 +248,10 @@ No server, no bot network, no cloud dependency.
 ## Demo video script
 
 See `docs/demo-script.md` (3-minute capture script). The dashboard's
-**LIVE MAINNET PROOF** strip renders recorded sponsored hashes directly from
-the ledger; the value-settlement leg is marked **pending ~1 USDC collateral**
-until it lands. No fake receipts, no fake live execution.
+**LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE** strip renders recorded
+sponsored hashes directly from the ledger; a separate **NONZERO SETTLEMENT —
+PENDING COLLATERAL** marker keeps the value leg honest. No fake receipts, no
+fake live execution.
 
 ## Transaction / evidence placeholders
 
@@ -249,7 +261,8 @@ until it lands. No fake receipts, no fake live execution.
 | Layer-1: `approve(CTF, 0)` (Polygon) | `pnpm zero-value --resolved=…` | **DONE** — `0x1579c791…264a` (sponsored) |
 | Layer-1: `redeemPositions` (real resolved condition, gate OPEN) | `pnpm zero-value --resolved=…` | **DONE** — `0xc7953f32…ff77` (sponsored) |
 | Layer-1: `transfer(0)` to beneficiary | `pnpm zero-value --resolved=…` | **DONE** — `0x2c453a77…f45b1` (sponsored) |
-| Gate proofs (immutability + blocked) | `pnpm proofs` | **DONE** — both outputs verified (zero-funding) |
+| Independent postcondition verification | `pnpm verify --policy-id=policy-ca2df166` | **DONE** — PROVEN (finality+integrity+execution+possession) |
+| Gate proofs (immutability + blocked + exactly-once) | `pnpm proofs` | **DONE** — all three outputs verified (zero-funding) |
 | Prototype: full lifecycle (approve/create/split/block/resolve/redeem/route) | `pnpm prototype` | PENDING (~1 USDC in org wallet) |
 | Live-value settle on resolved FOMC (denom 1, YES wins) | `pnpm execute --policy-id=policy-2252243` | PENDING (~1 USDC + gate open on chain) |
 | Local demo loop (5 hashes) | `pnpm demo:*` | PENDING (optional cross-check) |
@@ -266,6 +279,12 @@ each step runs; nothing requires hand-editing.
 - **Finality gate.** A provisional outcome moves the obligation to
   `WAITING_FINALITY` and settles nothing (`SETTLEMENT BLOCKED`); money only
   moves on the final on-chain payout state.
+- **Exactly-once.** A settled obligation cannot authorize a second payment
+  (`ALREADY SETTLED`); a failed/disputed execution stays alive for retry under
+  the same frozen hash — retry can discharge the obligation, never mutate it.
+- **Postcondition proof.** Settlement closes as `SETTLED` only after `pnpm
+  verify` re-reads finality, envelope integrity, the confirmed transaction and
+  beneficiary possession directly from Polygon — `PROVEN`, not assumed.
 - **Every broadcast is preflighted live** (simulate, `success` +
   `wouldRevert:false`) before it is signed.
 - **Renn never holds or signs;** KeeperHub does.

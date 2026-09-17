@@ -20,6 +20,7 @@
     "proofs": "tsx scripts/proofs.ts",
     "watch": "tsx src/index.ts watch",
     "dashboard": "tsx scripts/serve-dashboard.ts",
+    "site:export": "tsx scripts/export-site.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -233,9 +233,10 @@
     }[c]));
   }
 
-  let data = { policies: [] };
+  const EMBEDDED = window.__RENN_SNAPSHOT__ !== undefined;
+  let data = EMBEDDED ? window.__RENN_SNAPSHOT__.policiesPayload || { policies: [] } : { policies: [] };
   let heroState = "ARMED";
-  let evidenceData = { transactions: [] };
+  let evidenceData = EMBEDDED ? window.__RENN_SNAPSHOT__.evidencePayload || { transactions: [] } : { transactions: [] };
 
   function renderEvidence() {
     const box = $("evidence");
@@ -264,6 +265,7 @@
   async function refreshEvidence() {
     try {
       const r = await fetch("/evidence");
+      if (!r.ok) throw new Error("no server");
       evidenceData = await r.json();
       renderEvidence();
     } catch {
@@ -274,22 +276,28 @@
   async function refresh() {
     try {
       const r = await fetch("/policies");
+      if (!r.ok) throw new Error("no server");
       data = await r.json();
       $("s-poly").className = "dot ok";
       $("s-gamma").className = "dot ok";
-      heroState = data.policies[0]?.state ?? "ARMED";
-      renderPipeline();
-      frames();
     } catch {
-      $("s-poly").className = "dot err";
-      $("s-gamma").className = "dot err";
+      if (!EMBEDDED) {
+        $("s-poly").className = "dot err";
+        $("s-gamma").className = "dot err";
+      }
     }
+    heroState = data.policies[0]?.state ?? "ARMED";
+    renderPipeline();
+    frames();
     $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ");
   }
+  renderEvidence();
   refresh();
   refreshEvidence();
-  setInterval(refresh, 15000);
-  setInterval(refreshEvidence, 15000);
+  if (!EMBEDDED) {
+    setInterval(refresh, 15000);
+    setInterval(refreshEvidence, 15000);
+  }
 </script>
 </body>
 </html>

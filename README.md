@@ -209,7 +209,9 @@ pnpm execute --policy-id=<policy-id>  # settle only the frozen obligation (final
 pnpm sanity                           # zero-value sponsored execution proof (empty wallet, real tx)
 pnpm prototype --beneficiary=<addr>   # full KeeperHub-executed lifecycle (sponsored)
 pnpm proofs                           # zero-funding gate proofs: obligation immutability + blocked execute
+pnpm verify --policy-id=<id>          # independent on-chain settlement verification (PROVEN/BLOCKED/DISPUTED)
 pnpm zero-value --resolved=<cond> --parent=<parent> [--beneficiary=<addr>]   # Layer-1 proof on a really-resolved condition
+pnpm site:export                      # static, backend-free dashboard in dist/index.html (deploy to any host)
 ```
 
 `execute` refuses two things before it ever broadcasts: a **provisional

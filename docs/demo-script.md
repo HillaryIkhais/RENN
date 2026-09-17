@@ -9,8 +9,8 @@ labelled PENDING — the video never pretends a hash exists.
 | Segment | Requires | Marks |
 |---------|----------|-------|
 | 1 (arm / finality / block) | nothing (verified live) | real states, reads, workflow JSON, WAITING_FINALITY / SETTLEMENT BLOCKED cards |
-| 2 (failure proofs) | nothing (verified) | `pnpm proofs` — immutability + blocked-execution outputs |
-| 3 (KeeperHub execution) | `kh_` org key (present) | three real sponsored Polygon hashes already on-chain |
+| 2 (failure proofs) | nothing (verified) | `pnpm proofs` — immutability + blocked-execution + exactly-once outputs |
+| 3 (KeeperHub execution + verify) | `kh_` org key (present) | three real sponsored Polygon hashes + `pnpm verify` PROVEN |
 | 4 (live value settlement) | ~1 USDC in org wallet `0x9f7d…e6fc` | NOT YET — shown as an honest pending card |
 
 If a segment's prerequisite is missing, say so in the video and stop — no
@@ -42,8 +42,8 @@ result.**
 pnpm proofs
 ```
 
-[The dashboard is a UI; the guarantee lives in code. Two proofs, run live from
-the same modules the product uses:]
+[The dashboard is a UI; the guarantee lives in code. Three proofs, run live
+from the same modules the product uses:]
 
 1. **Obligation immutability** — tampering beneficiary, face value, or
    condition after locking produces a different envelope hash, so the execute
@@ -52,10 +52,14 @@ the same modules the product uses:]
 2. **Finality gate** — a policy in WAITING_FINALITY is refused by the execute
    path: `SETTLEMENT BLOCKED … No irreversible obligation fires on a
    preliminary result`.
+3. **Exactly-once** — a settled obligation refuses a duplicate payment:
+   `ALREADY SETTLED`. Settlement consumes the execution authority; a failed
+   execution stays alive under the same frozen hash and can only discharge the
+   obligation, never mint a new payout.
 
 Run from a scratch ledger (`.data/proofs/`), zero funding, real code paths.
 
-## Take 3 — KeeperHub discharged a real obligation (1:20–2:20)
+## Take 3 — KeeperHub discharged a real obligation, and Renn proved it (1:20–2:20)
 
 [To prove the loop against the actual Polymarket CTF contract without waiting
 on a vote, Renn armed a finally-resolved condition and let KeeperHub run the
@@ -63,18 +67,22 @@ whole lifecycle from the organisation's wallet — sponsored, no local signing.]
 
 ```
 pnpm zero-value --resolved=0x0c481aa6…4e4eae0 --parent=0x0000…0000 --beneficiary=0x0716…
+pnpm verify --policy-id=policy-ca2df166
 ```
 
-Dashboard: the **LIVE MAINNET PROOF** strip now lists the real sponsored
-executions (`.data/zero-value.jsonl`, every one verified on PolygonScan):
+Dashboard: the **LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE** strip lists
+the real sponsored executions (`.data/zero-value.jsonl`, all PolygonScan
+verified):
 
 1. `approve(CTF, 0)` — executionId `dblyr1n2ahek4iegwi96b`, tx `0x1579c791…64a`
 2. `redeemPositions` on the real condition — executionId `a9o7uh3k9mth5mhnmeoay`, tx `0xc7953f32…ff77`
 3. routing value to beneficiary — executionId `y3729jn0stn1xmdmafg6h`, tx `0x2c453a77…45f1`
 
 [That redeemPositions call is not a mock — it exercised the real Polymarket
-CTF contract at `0x4D97…6045`. KeeperHub reagents: sponsor the gas, run the
-frozen workflow, return the receipt. No wallet gas, no local signing.]
+CTF contract at `0x4D97…6045`. But the important part is the next command:
+`pnpm verify` does not trust "the tx exists" or "KeeperHub said completed". It
+re-reads Polygon itself: finality (denom 1 on chain), envelope integrity,
+confirmed transaction, beneficiary possession. **OBLIGATION PROVEN SETTLED.**]
 
 ## Take 4 — The live value leg (2:20–2:50)
 
@@ -110,7 +118,8 @@ is probabilistic; settlement isn't. Repo and docs are linked below.]
 ## Evidence checklist (final insertion pass)
 
 1. [x] Three real sponsored Polygon hashes from the Layer-1 proof
-2. [x] `pnpm proofs` outputs (immutability + blocked) — scratch-ledger run
-3. [x] `sanity` sponsored Base hash — `0xd92588006e35…511c6d` (approve 0, sponsored)
-4. [ ] Dashboard screenshots with the LIVE MAINNET PROOF strip + the pending-value card
-5. [ ] Once funded: ONE more Polygon run with real USDC + receipt (completes Take 4)
+2. [x] `pnpm proofs` outputs (immutability + blocked + exactly-once) — scratch-ledger run
+3. [x] `pnpm verify` output (PROVEN: finality + integrity + execution + postcondition)
+4. [x] `sanity` sponsored Base hash — `0xd92588006e35…511c6d` (approve 0, sponsored)
+5. [ ] Dashboard screenshots with the LIVE MAINNET EXECUTION PROOF — ZERO ASSET VALUE strip + NONZERO SETTLEMENT — PENDING COLLATERAL card
+6. [ ] Once funded: ONE more Polygon run with real USDC + receipt (completes Take 4)
